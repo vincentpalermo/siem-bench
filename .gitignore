@@ -1,0 +1,38 @@
+# binaries
+bin/
+dist/
+
+# build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.out
+*.test
+
+# Go coverage
+*.coverprofile
+coverage.out
+
+# dependencies/workspaces
+vendor/
+
+# IDE
+.idea/
+.vscode/
+
+# env
+.env
+.env.*
+
+# logs
+*.log
+
+# results
+results/*.json
+results/*.csv
+
+# OS files
+.DS_Store
+Thumbs.db
