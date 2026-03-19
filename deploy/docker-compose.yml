@@ -1,0 +1,77 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: siem-postgres
+    environment:
+      POSTGRES_DB: siem
+      POSTGRES_USER: siem
+      POSTGRES_PASSWORD: siem
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    container_name: siem-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: siem-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    restart: unless-stopped
+    depends_on:
+      - postgres-exporter
+      - redis-exporter
+      - node-exporter
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: siem-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: siem-postgres-exporter
+    environment:
+      DATA_SOURCE_NAME: "postgresql://siem:siem@postgres:5432/siem?sslmode=disable"
+    ports:
+      - "9187:9187"
+    restart: unless-stopped
+    depends_on:
+      - postgres
+
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: siem-redis-exporter
+    environment:
+      REDIS_ADDR: "redis://redis:6379"
+    ports:
+      - "9121:9121"
+    restart: unless-stopped
+    depends_on:
+      - redis
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: siem-node-exporter
+    ports:
+      - "9100:9100"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  grafana_data:
