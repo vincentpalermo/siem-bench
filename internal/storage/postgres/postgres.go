@@ -73,3 +73,124 @@ func (s *Storage) CountEvents(ctx context.Context) (int64, error) {
 	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM events`).Scan(&count)
 	return count, err
 }
+
+func (s *Storage) SearchByHost(ctx context.Context, host string, limit int) ([]model.EventQueryResult, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, timestamp, source_type, host, user_name, src_ip, dst_ip, event_code, severity, message
+		FROM events
+		WHERE host = $1
+		ORDER BY timestamp DESC
+		LIMIT $2
+	`, host, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []model.EventQueryResult
+	for rows.Next() {
+		var item model.EventQueryResult
+		if err := rows.Scan(
+			&item.ID,
+			&item.Timestamp,
+			&item.SourceType,
+			&item.Host,
+			&item.UserName,
+			&item.SrcIP,
+			&item.DstIP,
+			&item.EventCode,
+			&item.Severity,
+			&item.Message,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, item)
+	}
+
+	return results, rows.Err()
+}
+
+func (s *Storage) SearchByUser(ctx context.Context, userName string, limit int) ([]model.EventQueryResult, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, timestamp, source_type, host, user_name, src_ip, dst_ip, event_code, severity, message
+		FROM events
+		WHERE user_name = $1
+		ORDER BY timestamp DESC
+		LIMIT $2
+	`, userName, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []model.EventQueryResult
+	for rows.Next() {
+		var item model.EventQueryResult
+		if err := rows.Scan(
+			&item.ID,
+			&item.Timestamp,
+			&item.SourceType,
+			&item.Host,
+			&item.UserName,
+			&item.SrcIP,
+			&item.DstIP,
+			&item.EventCode,
+			&item.Severity,
+			&item.Message,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, item)
+	}
+
+	return results, rows.Err()
+}
+
+func (s *Storage) CountBySeverity(ctx context.Context) ([]model.SeverityCount, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT severity, COUNT(*) AS cnt
+		FROM events
+		GROUP BY severity
+		ORDER BY severity
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []model.SeverityCount
+	for rows.Next() {
+		var item model.SeverityCount
+		if err := rows.Scan(&item.Severity, &item.Count); err != nil {
+			return nil, err
+		}
+		results = append(results, item)
+	}
+
+	return results, rows.Err()
+}
+
+func (s *Storage) TopHosts(ctx context.Context, limit int) ([]model.HostCount, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT host, COUNT(*) AS cnt
+		FROM events
+		GROUP BY host
+		ORDER BY cnt DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []model.HostCount
+	for rows.Next() {
+		var item model.HostCount
+		if err := rows.Scan(&item.Host, &item.Count); err != nil {
+			return nil, err
+		}
+		results = append(results, item)
+	}
+
+	return results, rows.Err()
+}

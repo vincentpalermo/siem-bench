@@ -84,6 +84,23 @@ var (
 			Buckets: prometheus.DefBuckets,
 		},
 	)
+
+	QueryRequestsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "siem_query_requests_total",
+			Help: "Total number of query-runner requests",
+		},
+		[]string{"backend", "query", "status"},
+	)
+
+	QueryDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "siem_query_duration_seconds",
+			Help:    "Query execution duration in seconds",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"backend", "query"},
+	)
 )
 
 func MustRegister() {
@@ -99,5 +116,9 @@ func MustRegister() {
 		WorkerAckErrorsTotal,
 		WorkerBatchSize,
 		WorkerInsertDuration,
+		QueryRequestsTotal,
+		QueryDuration,
 	)
 }
+
+
