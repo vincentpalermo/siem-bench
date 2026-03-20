@@ -13,8 +13,13 @@ import (
 
 	"siem-bench/internal/config"
 	"siem-bench/internal/model"
-	"siem-bench/internal/storage/postgres"
+	chstorage "siem-bench/internal/storage/clickhouse"
+	pgstorage "siem-bench/internal/storage/postgres"
 )
+
+type counter interface {
+	CountEvents(ctx context.Context) (int64, error)
+}
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
@@ -36,16 +41,38 @@ func main() {
 		log.Fatalf("invalid GENERATOR_SEC: %s", cfg.GeneratorSec)
 	}
 
+	var db counter
+	backend := cfg.GeneratorBackend
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	storage, err := postgres.New(ctx, cfg.PostgresDSN)
-	if err != nil {
-		log.Fatalf("postgres connect failed: %v", err)
-	}
-	defer storage.Close()
+	switch backend {
+	case "postgres":
+		storage, err := pgstorage.New(ctx, cfg.PostgresDSN)
+		if err != nil {
+			log.Fatalf("postgres connect failed: %v", err)
+		}
+		defer storage.Close()
+		db = storage
 
-	dbCountBefore, err := storage.CountEvents(context.Background())
+	case "clickhouse":
+		storage, err := chstorage.New(ctx, cfg.ClickHouseDSN)
+		if err != nil {
+			log.Fatalf("clickhouse connect failed: %v", err)
+		}
+		defer func() {
+			if err := storage.Close(); err != nil {
+				log.Printf("clickhouse close error: %v", err)
+			}
+		}()
+		db = storage
+
+	default:
+		log.Fatalf("unsupported GENERATOR_BACKEND: %s", backend)
+	}
+
+	dbCountBefore, err := db.CountEvents(context.Background())
 	if err != nil {
 		log.Fatalf("count before failed: %v", err)
 	}
@@ -54,8 +81,8 @@ func main() {
 	runID := startedAt.Format("20060102-150405")
 
 	totalEvents := eps * durationSec
-	log.Printf("generator started: collector=%s eps=%d batch=%d duration=%ds total_events=%d db_before=%d",
-		cfg.CollectorURL, eps, batchSize, durationSec, totalEvents, dbCountBefore)
+	log.Printf("generator started: backend=%s collector=%s eps=%d batch=%d duration=%ds total_events=%d db_before=%d",
+		backend, cfg.CollectorURL, eps, batchSize, durationSec, totalEvents, dbCountBefore)
 
 	client := &http.Client{
 		Timeout: 10 * time.Second,
@@ -128,7 +155,7 @@ func main() {
 
 	time.Sleep(2 * time.Second)
 
-	dbCountAfter, err := storage.CountEvents(context.Background())
+	dbCountAfter, err := db.CountEvents(context.Background())
 	if err != nil {
 		log.Fatalf("count after failed: %v", err)
 	}
@@ -137,7 +164,7 @@ func main() {
 
 	result := model.RunResult{
 		RunID:          runID,
-		Backend:        "postgres",
+		Backend:        backend,
 		EPS:            eps,
 		BatchSize:      batchSize,
 		DurationSec:    durationSec,
@@ -151,13 +178,13 @@ func main() {
 		FinishedAt:     finishedAt,
 	}
 
-	resultPath := fmt.Sprintf("results/run-%s.json", runID)
+	resultPath := fmt.Sprintf("results/run-%s-%s.json", backend, runID)
 	if err := model.SaveRunResult(resultPath, result); err != nil {
 		log.Printf("failed to save run result: %v", err)
 	} else {
 		log.Printf("run result saved: %s", resultPath)
 	}
 
-	log.Printf("generator finished: sent_events=%d sent_requests=%d failed_requests=%d db_before=%d db_after=%d db_inserted=%d",
-		sentEvents, sentRequests, failedRequests, dbCountBefore, dbCountAfter, dbCountAfter-dbCountBefore)
+	log.Printf("generator finished: backend=%s sent_events=%d sent_requests=%d failed_requests=%d db_before=%d db_after=%d db_inserted=%d",
+		backend, sentEvents, sentRequests, failedRequests, dbCountBefore, dbCountAfter, dbCountAfter-dbCountBefore)
 }

@@ -9,11 +9,13 @@ type Config struct {
 	RedisGroup    string
 	RedisConsumer string
 	PostgresDSN   string
+	ClickHouseDSN string
 
-	CollectorURL   string
-	GeneratorEPS   string
-	GeneratorBatch string
-	GeneratorSec   string
+	CollectorURL     string
+	GeneratorEPS     string
+	GeneratorBatch   string
+	GeneratorSec     string
+	GeneratorBackend string
 }
 
 func getEnv(key, fallback string) string {
@@ -32,10 +34,12 @@ func Load() Config {
 		RedisGroup:    getEnv("REDIS_GROUP", "workers"),
 		RedisConsumer: getEnv("REDIS_CONSUMER", "worker-1"),
 		PostgresDSN:   getEnv("POSTGRES_DSN", "postgres://siem:siem@localhost:5432/siem?sslmode=disable"),
+		ClickHouseDSN: getEnv("CLICKHOUSE_DSN", "clickhouse://localhost:9000?database=siem"),
 
-		CollectorURL:   getEnv("COLLECTOR_URL", "http://localhost:8080/ingest"),
-		GeneratorEPS:   getEnv("GENERATOR_EPS", "100"),
-		GeneratorBatch: getEnv("GENERATOR_BATCH", "10"),
-		GeneratorSec:   getEnv("GENERATOR_SEC", "10"),
+		CollectorURL:     getEnv("COLLECTOR_URL", "http://localhost:8080/ingest"),
+		GeneratorEPS:     getEnv("GENERATOR_EPS", "100"),
+		GeneratorBatch:   getEnv("GENERATOR_BATCH", "10"),
+		GeneratorSec:     getEnv("GENERATOR_SEC", "10"),
+		GeneratorBackend: getEnv("GENERATOR_BACKEND", "postgres"),
 	}
 }

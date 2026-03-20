@@ -71,7 +71,22 @@ services:
     ports:
       - "9100:9100"
     restart: unless-stopped
+  
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: siem-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_DB: siem
+      CLICKHOUSE_USER: siem
+      CLICKHOUSE_PASSWORD: siem
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    restart: unless-stopped
 
 volumes:
   postgres_data:
   grafana_data:
+  clickhouse_data:
