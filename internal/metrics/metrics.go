@@ -120,5 +120,3 @@ func MustRegister() {
 		QueryDuration,
 	)
 }
-
-

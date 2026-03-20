@@ -3,13 +3,14 @@ package config
 import "os"
 
 type Config struct {
-	HTTPAddr      string
-	RedisAddr     string
-	RedisStream   string
-	RedisGroup    string
-	RedisConsumer string
-	PostgresDSN   string
-	ClickHouseDSN string
+	HTTPAddr         string
+	RedisAddr        string
+	RedisStream      string
+	RedisGroup       string
+	RedisConsumer    string
+	PostgresDSN      string
+	ClickHouseDSN    string
+	ElasticsearchURL string
 
 	CollectorURL     string
 	GeneratorEPS     string
@@ -28,13 +29,14 @@ func getEnv(key, fallback string) string {
 
 func Load() Config {
 	return Config{
-		HTTPAddr:      getEnv("HTTP_ADDR", ":8080"),
-		RedisAddr:     getEnv("REDIS_ADDR", "localhost:6379"),
-		RedisStream:   getEnv("REDIS_STREAM", "events"),
-		RedisGroup:    getEnv("REDIS_GROUP", "workers"),
-		RedisConsumer: getEnv("REDIS_CONSUMER", "worker-1"),
-		PostgresDSN:   getEnv("POSTGRES_DSN", "postgres://siem:siem@localhost:5432/siem?sslmode=disable"),
-		ClickHouseDSN: getEnv("CLICKHOUSE_DSN", "clickhouse://localhost:9000?database=siem"),
+		HTTPAddr:         getEnv("HTTP_ADDR", ":8080"),
+		RedisAddr:        getEnv("REDIS_ADDR", "localhost:6379"),
+		RedisStream:      getEnv("REDIS_STREAM", "events"),
+		RedisGroup:       getEnv("REDIS_GROUP", "workers"),
+		RedisConsumer:    getEnv("REDIS_CONSUMER", "worker-1"),
+		PostgresDSN:      getEnv("POSTGRES_DSN", "postgres://siem:siem@localhost:5432/siem?sslmode=disable"),
+		ClickHouseDSN:    getEnv("CLICKHOUSE_DSN", "clickhouse://localhost:9000?database=siem"),
+		ElasticsearchURL: getEnv("ELASTICSEARCH_URL", "http://127.0.0.1:9200"),
 
 		CollectorURL:     getEnv("COLLECTOR_URL", "http://localhost:8080/ingest"),
 		GeneratorEPS:     getEnv("GENERATOR_EPS", "100"),

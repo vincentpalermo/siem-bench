@@ -14,6 +14,7 @@ import (
 	"siem-bench/internal/config"
 	"siem-bench/internal/model"
 	chstorage "siem-bench/internal/storage/clickhouse"
+	esstorage "siem-bench/internal/storage/elasticsearch"
 	pgstorage "siem-bench/internal/storage/postgres"
 )
 
@@ -64,6 +65,18 @@ func main() {
 		defer func() {
 			if err := storage.Close(); err != nil {
 				log.Printf("clickhouse close error: %v", err)
+			}
+		}()
+		db = storage
+
+	case "elasticsearch":
+		storage, err := esstorage.New(cfg.ElasticsearchURL)
+		if err != nil {
+			log.Fatalf("elasticsearch connect failed: %v", err)
+		}
+		defer func() {
+			if err := storage.Close(); err != nil {
+				log.Printf("elasticsearch close error: %v", err)
 			}
 		}()
 		db = storage
