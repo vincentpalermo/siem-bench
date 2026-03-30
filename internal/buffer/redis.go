@@ -6,7 +6,6 @@ import (
 	"errors"
 
 	"github.com/redis/go-redis/v9"
-
 	"siem-bench/internal/model"
 )
 
@@ -24,7 +23,6 @@ func NewRedisBuffer(addr, stream string) *RedisBuffer {
 	client := redis.NewClient(&redis.Options{
 		Addr: addr,
 	})
-
 	return &RedisBuffer{
 		client: client,
 		stream: stream,
@@ -40,7 +38,6 @@ func (r *RedisBuffer) PublishEvent(ctx context.Context, event model.Event) error
 	if err != nil {
 		return err
 	}
-
 	return r.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: r.stream,
 		Values: map[string]any{
@@ -51,13 +48,11 @@ func (r *RedisBuffer) PublishEvent(ctx context.Context, event model.Event) error
 
 func (r *RedisBuffer) PublishEvents(ctx context.Context, events []model.Event) error {
 	pipe := r.client.Pipeline()
-
 	for _, event := range events {
 		payload, err := json.Marshal(event)
 		if err != nil {
 			return err
 		}
-
 		pipe.XAdd(ctx, &redis.XAddArgs{
 			Stream: r.stream,
 			Values: map[string]any{
@@ -65,7 +60,6 @@ func (r *RedisBuffer) PublishEvents(ctx context.Context, events []model.Event) e
 			},
 		})
 	}
-
 	_, err := pipe.Exec(ctx)
 	return err
 }
@@ -97,14 +91,12 @@ func (r *RedisBuffer) ReadGroup(ctx context.Context, group, consumer string, cou
 	}
 
 	var result []StreamMessage
-
 	for _, stream := range streams {
 		for _, msg := range stream.Messages {
 			rawPayload, ok := msg.Values["payload"]
 			if !ok {
 				continue
 			}
-
 			payloadStr, ok := rawPayload.(string)
 			if !ok {
 				continue
@@ -121,7 +113,6 @@ func (r *RedisBuffer) ReadGroup(ctx context.Context, group, consumer string, cou
 			})
 		}
 	}
-
 	return result, nil
 }
 
@@ -130,4 +121,16 @@ func (r *RedisBuffer) Ack(ctx context.Context, group string, ids ...string) erro
 		return nil
 	}
 	return r.client.XAck(ctx, r.stream, group, ids...).Err()
+}
+
+func (r *RedisBuffer) StreamLen(ctx context.Context) (int64, error) {
+	return r.client.XLen(ctx, r.stream).Result()
+}
+
+func (r *RedisBuffer) PendingCount(ctx context.Context, group string) (int64, error) {
+	summary, err := r.client.XPending(ctx, r.stream, group).Result()
+	if err != nil {
+		return 0, err
+	}
+	return summary.Count, nil
 }

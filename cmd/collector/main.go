@@ -37,7 +37,7 @@ func main() {
 		start := time.Now()
 		defer func() {
 			metrics.CollectorRequestsTotal.WithLabelValues("/health", "GET", "200").Inc()
-			metrics.CollectorRequestDuration.WithLabelValues("/health").Observe(time.Since(start).Seconds())
+			metrics.CollectorRequestDuration.WithLabelValues("/health", "GET", "200").Observe(time.Since(start).Seconds())
 		}()
 
 		w.Header().Set("Content-Type", "application/json")
@@ -48,11 +48,12 @@ func main() {
 
 	r.Post("/ingest", func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		statusCode := 202
+		statusCode := http.StatusAccepted
 
 		defer func() {
-			metrics.CollectorRequestsTotal.WithLabelValues("/ingest", "POST", strconv.Itoa(statusCode)).Inc()
-			metrics.CollectorRequestDuration.WithLabelValues("/ingest").Observe(time.Since(start).Seconds())
+			status := strconv.Itoa(statusCode)
+			metrics.CollectorRequestsTotal.WithLabelValues("/ingest", "POST", status).Inc()
+			metrics.CollectorRequestDuration.WithLabelValues("/ingest", "POST", status).Observe(time.Since(start).Seconds())
 		}()
 
 		defer r.Body.Close()
@@ -70,6 +71,11 @@ func main() {
 				statusCode = http.StatusBadRequest
 				http.Error(w, "empty events array", http.StatusBadRequest)
 				return
+			}
+
+			ingestedAt := time.Now().UTC()
+			for i := range events {
+				events[i].IngestedAt = ingestedAt
 			}
 
 			if err := redisBuffer.PublishEvents(r.Context(), events); err != nil {
@@ -93,6 +99,8 @@ func main() {
 
 		var event model.Event
 		if err := json.Unmarshal(raw, &event); err == nil {
+			event.IngestedAt = time.Now().UTC()
+
 			if err := redisBuffer.PublishEvent(r.Context(), event); err != nil {
 				metrics.CollectorPublishErrorsTotal.Inc()
 				statusCode = http.StatusInternalServerError

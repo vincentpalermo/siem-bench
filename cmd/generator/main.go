@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+	"strings"
 
+	"siem-bench/internal/buffer"
 	"siem-bench/internal/config"
 	"siem-bench/internal/model"
 	chstorage "siem-bench/internal/storage/clickhouse"
@@ -22,28 +24,105 @@ type counter interface {
 	CountEvents(ctx context.Context) (int64, error)
 }
 
+func getPositiveInt(value string, name string) int {
+	n, err := strconv.Atoi(value)
+	if err != nil || n <= 0 {
+		log.Fatalf("invalid %s: %s", name, value)
+	}
+	return n
+}
+
+func waitForDrain(cfg config.Config, db counter, buf *buffer.RedisBuffer) (int64, error) {
+	drainTimeoutSec := getPositiveInt(cfg.DrainTimeoutSec, "DRAIN_TIMEOUT_SEC")
+	drainPollMs := getPositiveInt(cfg.DrainPollMs, "DRAIN_POLL_MS")
+	drainStableChecks := getPositiveInt(cfg.DrainStableChecks, "DRAIN_STABLE_CHECKS")
+
+	deadline := time.Now().Add(time.Duration(drainTimeoutSec) * time.Second)
+	ticker := time.NewTicker(time.Duration(drainPollMs) * time.Millisecond)
+	defer ticker.Stop()
+
+	var lastDBCount int64 = -1
+	stableChecks := 0
+	warnedNoGroup := false
+
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
+		streamLen, streamErr := buf.StreamLen(ctx)
+		pendingCount, pendingErr := buf.PendingCount(ctx, cfg.RedisGroup)
+		dbCount, dbErr := db.CountEvents(ctx)
+
+		cancel()
+
+		if streamErr != nil {
+			return 0, streamErr
+		}
+
+		if pendingErr != nil {
+			if strings.Contains(pendingErr.Error(), "NOGROUP") {
+				if !warnedNoGroup {
+					log.Printf(
+						"drain check: consumer group not found yet for stream=%s group=%s; treating pending=0",
+						cfg.RedisStream, cfg.RedisGroup,
+					)
+					warnedNoGroup = true
+				}
+				pendingCount = 0
+			} else {
+				return 0, pendingErr
+			}
+		}
+
+		if dbErr != nil {
+			return 0, dbErr
+		}
+
+		if dbCount == lastDBCount {
+			stableChecks++
+		} else {
+			stableChecks = 0
+			lastDBCount = dbCount
+		}
+
+		ready := pendingCount == 0 && stableChecks >= drainStableChecks
+
+		log.Printf(
+			"drain check: stream_len=%d pending=%d db_count=%d stable_checks=%d/%d",
+			streamLen, pendingCount, dbCount, stableChecks, drainStableChecks,
+		)
+
+		if ready {
+			return dbCount, nil
+		}
+
+		if time.Now().After(deadline) {
+			log.Printf(
+				"drain timeout reached: stream_len=%d pending=%d db_count=%d stable_checks=%d/%d",
+				streamLen, pendingCount, dbCount, stableChecks, drainStableChecks,
+			)
+			return dbCount, nil
+		}
+
+		<-ticker.C
+	}
+}
+
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
 	cfg := config.Load()
 
-	eps, err := strconv.Atoi(cfg.GeneratorEPS)
-	if err != nil || eps <= 0 {
-		log.Fatalf("invalid GENERATOR_EPS: %s", cfg.GeneratorEPS)
-	}
+	eps := getPositiveInt(cfg.GeneratorEPS, "GENERATOR_EPS")
+	batchSize := getPositiveInt(cfg.GeneratorBatch, "GENERATOR_BATCH")
+	durationSec := getPositiveInt(cfg.GeneratorSec, "GENERATOR_SEC")
 
-	batchSize, err := strconv.Atoi(cfg.GeneratorBatch)
-	if err != nil || batchSize <= 0 {
-		log.Fatalf("invalid GENERATOR_BATCH: %s", cfg.GeneratorBatch)
-	}
-
-	durationSec, err := strconv.Atoi(cfg.GeneratorSec)
-	if err != nil || durationSec <= 0 {
-		log.Fatalf("invalid GENERATOR_SEC: %s", cfg.GeneratorSec)
+	backend := cfg.IngestBackend
+	runScenario := cfg.RunScenario
+	if runScenario == "" {
+		runScenario = "ingest-only"
 	}
 
 	var db counter
-	backend := cfg.GeneratorBackend
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -82,8 +161,16 @@ func main() {
 		db = storage
 
 	default:
-		log.Fatalf("unsupported GENERATOR_BACKEND: %s", backend)
+		log.Fatalf("unsupported INGEST_BACKEND: %s", backend)
 	}
+
+	buf := buffer.NewRedisBuffer(cfg.RedisAddr, cfg.RedisStream)
+	ctxPing, cancelPing := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := buf.Ping(ctxPing); err != nil {
+		cancelPing()
+		log.Fatalf("redis ping failed: %v", err)
+	}
+	cancelPing()
 
 	dbCountBefore, err := db.CountEvents(context.Background())
 	if err != nil {
@@ -92,14 +179,14 @@ func main() {
 
 	startedAt := time.Now().UTC()
 	runID := startedAt.Format("20060102-150405")
-
 	totalEvents := eps * durationSec
-	log.Printf("generator started: backend=%s collector=%s eps=%d batch=%d duration=%ds total_events=%d db_before=%d",
-		backend, cfg.CollectorURL, eps, batchSize, durationSec, totalEvents, dbCountBefore)
 
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
+	log.Printf(
+		"generator started: backend=%s collector=%s eps=%d batch=%d duration=%ds total_events=%d db_before=%d scenario=%s",
+		backend, cfg.CollectorURL, eps, batchSize, durationSec, totalEvents, dbCountBefore, runScenario,
+	)
+
+	client := &http.Client{Timeout: 10 * time.Second}
 
 	sentEvents := 0
 	sentRequests := 0
@@ -162,42 +249,115 @@ func main() {
 			sentEvents += len(batch)
 		}
 
-		log.Printf("progress: sent_events=%d sent_requests=%d failed_requests=%d",
-			sentEvents, sentRequests, failedRequests)
+		log.Printf(
+			"progress: sent_events=%d sent_requests=%d failed_requests=%d",
+			sentEvents, sentRequests, failedRequests,
+		)
 	}
 
-	time.Sleep(2 * time.Second)
+	sendFinishedAt := time.Now().UTC()
 
-	dbCountAfter, err := db.CountEvents(context.Background())
+	dbCountAfter, err := waitForDrain(cfg, db, buf)
 	if err != nil {
-		log.Fatalf("count after failed: %v", err)
+		log.Fatalf("wait for drain failed: %v", err)
 	}
 
 	finishedAt := time.Now().UTC()
 
+	dbInserted := dbCountAfter - dbCountBefore
+
+	sendElapsedSec := sendFinishedAt.Sub(startedAt).Seconds()
+	if sendElapsedSec < 0 {
+		sendElapsedSec = 0
+	}
+
+	totalElapsedSec := finishedAt.Sub(startedAt).Seconds()
+	if totalElapsedSec < 0 {
+		totalElapsedSec = 0
+	}
+
+	drainWaitSec := finishedAt.Sub(sendFinishedAt).Seconds()
+	if drainWaitSec < 0 {
+		drainWaitSec = 0
+	}
+
+	generatorSentEPS := 0.0
+	if sendElapsedSec > 0 {
+		generatorSentEPS = float64(sentEvents) / sendElapsedSec
+	}
+
+	storageEffectiveEPS := 0.0
+	if totalElapsedSec > 0 {
+		storageEffectiveEPS = float64(dbInserted) / totalElapsedSec
+	}
+
+	lossPercent := 0.0
+	dbInserted = dbCountAfter - dbCountBefore
+	if sentEvents > 0 {
+		lossPercent = (1.0 - float64(dbInserted)/float64(sentEvents)) * 100.0
+		if lossPercent < 0 {
+			lossPercent = 0
+		}
+	}
+
 	result := model.RunResult{
 		RunID:          runID,
 		Backend:        backend,
-		EPS:            eps,
-		BatchSize:      batchSize,
-		DurationSec:    durationSec,
 		SentEvents:     sentEvents,
 		SentRequests:   sentRequests,
 		FailedRequests: failedRequests,
 		DBCountBefore:  dbCountBefore,
 		DBCountAfter:   dbCountAfter,
-		DBInserted:     dbCountAfter - dbCountBefore,
-		StartedAt:      startedAt,
-		FinishedAt:     finishedAt,
+		DBInserted:           dbInserted,
+		GeneratorSentEPS:     generatorSentEPS,
+		StorageEffectiveEPS:  storageEffectiveEPS,
+		SendElapsedSec:       sendElapsedSec,
+		TotalElapsedSec:      totalElapsedSec,
+		DrainWaitSec:         drainWaitSec,
+		LossPercent:          lossPercent,
+
+		Notes:          cfg.RunTag,
+		ConfigSnapshot: model.RunConfigSnapshot{
+			CollectorURL:    cfg.CollectorURL,
+			WorkerBackend:   backend,
+			WorkerWriteMode: cfg.WorkerWriteMode,
+			RunScenario:     runScenario,
+			GeneratorEPS:    eps,
+			GeneratorBatch:  batchSize,
+			GeneratorSec:    durationSec,
+		},
+		StartedAt:  startedAt,
+		FinishedAt: finishedAt,
 	}
 
-	resultPath := fmt.Sprintf("results/run-%s-%s.json", backend, runID)
+	resultPath := ""
+	switch runScenario {
+	case "mixed":
+		resultPath = fmt.Sprintf("results/mixed/ingest-%s-%s.json", backend, runID)
+	default:
+		resultPath = fmt.Sprintf("results/ingest/run-%s-%s.json", backend, runID)
+	}
+
 	if err := model.SaveRunResult(resultPath, result); err != nil {
 		log.Printf("failed to save run result: %v", err)
 	} else {
 		log.Printf("run result saved: %s", resultPath)
 	}
 
-	log.Printf("generator finished: backend=%s sent_events=%d sent_requests=%d failed_requests=%d db_before=%d db_after=%d db_inserted=%d",
-		backend, sentEvents, sentRequests, failedRequests, dbCountBefore, dbCountAfter, dbCountAfter-dbCountBefore)
+	log.Printf(
+		"generator finished: backend=%s sent_events=%d sent_requests=%d failed_requests=%d db_before=%d db_after=%d db_inserted=%d generator_sent_eps=%.2f storage_effective_eps=%.2f send_elapsed_sec=%.2f total_elapsed_sec=%.2f drain_wait_sec=%.2f loss_percent=%.2f",
+		backend,
+		sentEvents,
+		sentRequests,
+		failedRequests,
+		dbCountBefore,
+		dbCountAfter,
+		dbInserted,
+		generatorSentEPS,
+		storageEffectiveEPS,
+		sendElapsedSec,
+		totalElapsedSec,
+		drainWaitSec,
+		lossPercent,
+	)
 }

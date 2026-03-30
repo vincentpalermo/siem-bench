@@ -1,28 +1,16 @@
-$projectRoot = "C:\Users\Vlad\Desktop\siem-bench"
+$ErrorActionPreference = "Stop"
 
-Write-Host "Starting SIEM bench infrastructure..." -ForegroundColor Cyan
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = Resolve-Path (Join-Path $scriptDir "..")
 
-Set-Location $projectRoot
+Write-Host "Repository root: $repoRoot"
+Write-Host "Starting infrastructure from $repoRoot ..." -ForegroundColor Cyan
 
-docker compose -f deploy/docker-compose.yml up -d
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Failed to start Docker infrastructure." -ForegroundColor Red
-    exit 1
+Push-Location $repoRoot
+try {
+    docker compose -f deploy/docker-compose.yml up -d
+    Write-Host "Infrastructure started." -ForegroundColor Green
 }
-
-Write-Host ""
-Write-Host "Docker containers started." -ForegroundColor Green
-Write-Host "Checking running containers..." -ForegroundColor Cyan
-
-docker ps
-
-Write-Host ""
-Write-Host "Available services:" -ForegroundColor Cyan
-Write-Host "Prometheus: http://localhost:9090"
-Write-Host "Grafana:    http://localhost:3000"
-Write-Host "PostgreSQL: localhost:5432"
-Write-Host "Redis:      localhost:6379"
-Write-Host "ClickHouse: localhost:8123 / 9000"
-Write-Host ""
-Write-Host "Infrastructure is ready." -ForegroundColor Green
+finally {
+    Pop-Location
+}

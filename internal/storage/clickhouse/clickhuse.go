@@ -108,6 +108,8 @@ func (s *Storage) SearchByHost(ctx context.Context, host string, limit int) ([]m
 	var results []model.EventQueryResult
 	for rows.Next() {
 		var item model.EventQueryResult
+		var severity int32
+
 		if err := rows.Scan(
 			&item.ID,
 			&item.Timestamp,
@@ -117,11 +119,13 @@ func (s *Storage) SearchByHost(ctx context.Context, host string, limit int) ([]m
 			&item.SrcIP,
 			&item.DstIP,
 			&item.EventCode,
-			&item.Severity,
+			&severity,
 			&item.Message,
 		); err != nil {
 			return nil, err
 		}
+
+		item.Severity = int(severity)
 		results = append(results, item)
 	}
 
@@ -144,6 +148,8 @@ func (s *Storage) SearchByUser(ctx context.Context, userName string, limit int) 
 	var results []model.EventQueryResult
 	for rows.Next() {
 		var item model.EventQueryResult
+		var severity int32
+
 		if err := rows.Scan(
 			&item.ID,
 			&item.Timestamp,
@@ -153,11 +159,13 @@ func (s *Storage) SearchByUser(ctx context.Context, userName string, limit int) 
 			&item.SrcIP,
 			&item.DstIP,
 			&item.EventCode,
-			&item.Severity,
+			&severity,
 			&item.Message,
 		); err != nil {
 			return nil, err
 		}
+
+		item.Severity = int(severity)
 		results = append(results, item)
 	}
 
@@ -179,10 +187,14 @@ func (s *Storage) CountBySeverity(ctx context.Context) ([]model.SeverityCount, e
 	var results []model.SeverityCount
 	for rows.Next() {
 		var item model.SeverityCount
+		var severity int32
 		var count uint64
-		if err := rows.Scan(&item.Severity, &count); err != nil {
+
+		if err := rows.Scan(&severity, &count); err != nil {
 			return nil, err
 		}
+
+		item.Severity = int(severity)
 		item.Count = int64(count)
 		results = append(results, item)
 	}

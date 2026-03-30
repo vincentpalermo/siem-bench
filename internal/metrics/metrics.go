@@ -6,89 +6,138 @@ var (
 	CollectorRequestsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "siem_collector_requests_total",
-			Help: "Total number of collector HTTP requests",
+			Help: "Total number of HTTP requests handled by collector.",
 		},
-		[]string{"endpoint", "method", "status"},
-	)
-
-	CollectorEventsAcceptedTotal = prometheus.NewCounter(
-		prometheus.CounterOpts{
-			Name: "siem_collector_events_accepted_total",
-			Help: "Total number of events accepted by collector",
-		},
-	)
-
-	CollectorPublishErrorsTotal = prometheus.NewCounter(
-		prometheus.CounterOpts{
-			Name: "siem_collector_publish_errors_total",
-			Help: "Total number of Redis publish errors in collector",
-		},
+		[]string{"path", "method", "status"},
 	)
 
 	CollectorRequestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "siem_collector_request_duration_seconds",
-			Help:    "Collector request duration in seconds",
+			Help:    "HTTP request duration in collector.",
 			Buckets: prometheus.DefBuckets,
 		},
-		[]string{"endpoint"},
+		[]string{"path", "method", "status"},
 	)
 
-	WorkerMessagesReadTotal = prometheus.NewCounter(
+	CollectorPublishErrorsTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "siem_collector_publish_errors_total",
+			Help: "Total number of Redis publish errors in collector.",
+		},
+	)
+
+	CollectorEventsAcceptedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "siem_collector_events_accepted_total",
+			Help: "Total number of events accepted by collector.",
+		},
+	)
+
+	WorkerMessagesReadTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "siem_worker_messages_read_total",
-			Help: "Total number of messages read by worker from Redis",
+			Help: "Total number of messages read by worker from Redis.",
 		},
+		[]string{"backend"},
 	)
 
-	WorkerEventsStoredTotal = prometheus.NewCounter(
-		prometheus.CounterOpts{
-			Name: "siem_worker_events_stored_total",
-			Help: "Total number of events stored by worker into PostgreSQL",
-		},
-	)
-
-	WorkerInsertErrorsTotal = prometheus.NewCounter(
-		prometheus.CounterOpts{
-			Name: "siem_worker_insert_errors_total",
-			Help: "Total number of PostgreSQL insert errors in worker",
-		},
-	)
-
-	WorkerReadErrorsTotal = prometheus.NewCounter(
+	WorkerReadErrorsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "siem_worker_read_errors_total",
-			Help: "Total number of Redis read errors in worker",
+			Help: "Total number of Redis read errors in worker.",
 		},
+		[]string{"backend"},
 	)
 
-	WorkerAckErrorsTotal = prometheus.NewCounter(
+	WorkerEventsStoredTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "siem_worker_events_stored_total",
+			Help: "Total number of events successfully stored by worker.",
+		},
+		[]string{"backend"},
+	)
+
+	WorkerInsertErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "siem_worker_insert_errors_total",
+			Help: "Total number of backend insert errors in worker.",
+		},
+		[]string{"backend"},
+	)
+
+	WorkerAckErrorsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "siem_worker_ack_errors_total",
-			Help: "Total number of Redis ack errors in worker",
+			Help: "Total number of Redis ACK errors in worker.",
 		},
+		[]string{"backend"},
 	)
 
-	WorkerBatchSize = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
-			Name:    "siem_worker_batch_size",
-			Help:    "Batch size processed by worker",
-			Buckets: []float64{1, 5, 10, 20, 50, 100, 200, 500},
-		},
-	)
-
-	WorkerInsertDuration = prometheus.NewHistogram(
+	WorkerInsertDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "siem_worker_insert_duration_seconds",
-			Help:    "Time spent inserting events into PostgreSQL",
+			Help:    "Duration of successful worker insert operations.",
 			Buckets: prometheus.DefBuckets,
 		},
+		[]string{"backend"},
+	)
+
+	WorkerBatchSize = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "siem_worker_batch_size",
+			Help:    "Batch size processed by worker.",
+			Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000},
+		},
+		[]string{"backend"},
+	)
+
+	WorkerE2ELatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "siem_worker_e2e_latency_seconds",
+			Help:    "End-to-end latency from event generation to successful worker processing.",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"backend"},
+	)
+
+	WorkerQueueLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "siem_worker_queue_latency_seconds",
+			Help:    "Latency from collector ingest to successful worker processing.",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"backend"},
+	)
+
+	WorkerStreamLen = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "siem_worker_stream_len",
+			Help: "Current Redis stream length observed by worker.",
+		},
+		[]string{"backend"},
+	)
+
+	WorkerPendingMessages = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "siem_worker_pending_messages",
+			Help: "Current number of pending Redis messages in worker consumer group.",
+		},
+		[]string{"backend"},
+	)
+
+	RunInfo = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "siem_run_info",
+			Help: "Static information about current run configuration.",
+		},
+		[]string{"backend", "scenario", "write_mode", "stream", "group"},
 	)
 
 	QueryRequestsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "siem_query_requests_total",
-			Help: "Total number of query-runner requests",
+			Help: "Total number of benchmark query executions.",
 		},
 		[]string{"backend", "query", "status"},
 	)
@@ -96,26 +145,38 @@ var (
 	QueryDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "siem_query_duration_seconds",
-			Help:    "Query execution duration in seconds",
+			Help:    "Duration of benchmark queries.",
 			Buckets: prometheus.DefBuckets,
 		},
 		[]string{"backend", "query"},
 	)
+
+	registered = false
 )
 
 func MustRegister() {
+	if registered {
+		return
+	}
+	registered = true
+
 	prometheus.MustRegister(
 		CollectorRequestsTotal,
-		CollectorEventsAcceptedTotal,
-		CollectorPublishErrorsTotal,
 		CollectorRequestDuration,
+		CollectorPublishErrorsTotal,
+		CollectorEventsAcceptedTotal,
 		WorkerMessagesReadTotal,
+		WorkerReadErrorsTotal,
 		WorkerEventsStoredTotal,
 		WorkerInsertErrorsTotal,
-		WorkerReadErrorsTotal,
 		WorkerAckErrorsTotal,
-		WorkerBatchSize,
 		WorkerInsertDuration,
+		WorkerBatchSize,
+		WorkerE2ELatency,
+		WorkerQueueLatency,
+		WorkerStreamLen,
+		WorkerPendingMessages,
+		RunInfo,
 		QueryRequestsTotal,
 		QueryDuration,
 	)

@@ -1,0 +1,17 @@
+{
+  "mappings": {
+    "properties": {
+      "id":          { "type": "keyword" },
+      "timestamp":   { "type": "date" },
+      "source_type": { "type": "keyword" },
+      "host":        { "type": "keyword" },
+      "user_name":   { "type": "keyword" },
+      "src_ip":      { "type": "ip" },
+      "dst_ip":      { "type": "ip" },
+      "event_code":  { "type": "keyword" },
+      "severity":    { "type": "integer" },
+      "message":     { "type": "text" },
+      "raw":         { "type": "text" }
+    }
+  }
+}

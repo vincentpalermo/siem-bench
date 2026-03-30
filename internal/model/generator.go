@@ -62,20 +62,21 @@ func GenerateEvent(id string) Event {
 	sourceType := sourceTypes[rand.Intn(len(sourceTypes))]
 	codes := eventCodes[sourceType]
 	code := codes[rand.Intn(len(codes))]
-
 	severity := rand.Intn(5) + 1
+	now := time.Now().UTC()
 
 	return Event{
-		ID:         id,
-		Timestamp:  time.Now().UTC(),
-		SourceType: sourceType,
-		Host:       randomHost(),
-		UserName:   randomUser(),
-		SrcIP:      randomIP(),
-		DstIP:      randomIP(),
-		EventCode:  code,
-		Severity:   severity,
-		Message:    fmt.Sprintf("%s event from %s", code, sourceType),
-		Raw:        fmt.Sprintf("raw log: type=%s code=%s host=%s", sourceType, code, randomHost()),
+		ID:          id,
+		Timestamp:   now,
+		SourceType:  sourceType,
+		Host:        randomHost(),
+		UserName:    randomUser(),
+		SrcIP:       randomIP(),
+		DstIP:       randomIP(),
+		EventCode:   code,
+		Severity:    severity,
+		Message:     fmt.Sprintf("%s event from %s", code, sourceType),
+		Raw:         fmt.Sprintf("raw log: type=%s code=%s host=%s", sourceType, code, randomHost()),
+		GeneratedAt: now,
 	}
 }

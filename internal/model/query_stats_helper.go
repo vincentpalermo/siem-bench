@@ -1,35 +1,71 @@
 package model
 
+import "sync"
+
 type QueryAccumulator struct {
-	Name            string
-	Count           int
-	Failed          int
-	TotalDurationMs float64
-	MaxDurationMs   float64
+	Name           string
+	Count          int
+	Failed         int
+	SumDurationMs  float64
+	MaxDurationMs  float64
+	MinDurationMs  float64
+	LastDurationMs float64
+	initialized    bool
+	mu             sync.Mutex
 }
 
-func (q *QueryAccumulator) Add(durationMs float64, failed bool) {
-	q.Count++
+func (a *QueryAccumulator) Add(durationMs float64, failed bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	a.Count++
 	if failed {
-		q.Failed++
+		a.Failed++
 	}
-	q.TotalDurationMs += durationMs
-	if durationMs > q.MaxDurationMs {
-		q.MaxDurationMs = durationMs
+
+	a.SumDurationMs += durationMs
+	a.LastDurationMs = durationMs
+
+	if !a.initialized {
+		a.MinDurationMs = durationMs
+		a.MaxDurationMs = durationMs
+		a.initialized = true
+		return
+	}
+
+	if durationMs > a.MaxDurationMs {
+		a.MaxDurationMs = durationMs
+	}
+	if durationMs < a.MinDurationMs {
+		a.MinDurationMs = durationMs
 	}
 }
 
-func (q *QueryAccumulator) ToStat() QueryStat {
+func (a *QueryAccumulator) ToStat() QueryStat {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
 	avg := 0.0
-	if q.Count > 0 {
-		avg = q.TotalDurationMs / float64(q.Count)
+	if a.Count > 0 {
+		avg = a.SumDurationMs / float64(a.Count)
+	}
+
+	min := 0.0
+	max := 0.0
+	last := 0.0
+	if a.initialized {
+		min = a.MinDurationMs
+		max = a.MaxDurationMs
+		last = a.LastDurationMs
 	}
 
 	return QueryStat{
-		Name:          q.Name,
-		Count:         q.Count,
-		Failed:        q.Failed,
-		AvgDurationMs: avg,
-		MaxDurationMs: q.MaxDurationMs,
+		Name:           a.Name,
+		Count:          a.Count,
+		Failed:         a.Failed,
+		AvgDurationMs:  avg,
+		MaxDurationMs:  max,
+		MinDurationMs:  min,
+		LastDurationMs: last,
 	}
 }

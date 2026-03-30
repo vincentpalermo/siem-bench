@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -25,12 +25,10 @@ func getEnvInt(key string, fallback int) int {
 	if val == "" {
 		return fallback
 	}
-
 	parsed, err := strconv.Atoi(val)
-	if err != nil || parsed <= 0 {
+	if err != nil || parsed < 0 {
 		return fallback
 	}
-
 	return parsed
 }
 
@@ -39,42 +37,27 @@ func recordQueryMetric(backend, query string, started time.Time, err error) {
 	if err != nil {
 		status = "error"
 	}
-
 	metrics.QueryRequestsTotal.WithLabelValues(backend, query, status).Inc()
 	metrics.QueryDuration.WithLabelValues(backend, query).Observe(time.Since(started).Seconds())
 }
 
-func execQuery(acc *model.QueryAccumulator, backend, name string, fn func() error) {
+func execQuery(acc *model.QueryAccumulator, backend, name string, fn func() error, collectStats bool) {
 	start := time.Now()
 	err := fn()
 	durationMs := float64(time.Since(start).Microseconds()) / 1000.0
 
 	recordQueryMetric(backend, name, start, err)
-	acc.Add(durationMs, err != nil)
+
+	if collectStats {
+		acc.Add(durationMs, err != nil)
+	}
 
 	if err != nil {
 		log.Printf("%s %s error: %v", backend, name, err)
 	}
 }
 
-func saveQueryResult(path string, result model.QueryRunResult) error {
-	if err := os.MkdirAll("results", 0755); err != nil {
-		return err
-	}
-
-	file, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	enc := json.NewEncoder(file)
-	enc.SetIndent("", "  ")
-
-	return enc.Encode(result)
-}
-
-func runPostgresQueries(deadline time.Time, backend string, stats map[string]*model.QueryAccumulator, dsn string) {
+func runWorkloadPostgres(workload model.QueryWorkload, backend string, stats map[string]*model.QueryAccumulator, dsn string, intervalSec int, deadline time.Time, collectStats bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	storage, err := pgstorage.New(ctx, dsn)
 	cancel()
@@ -83,34 +66,51 @@ func runPostgresQueries(deadline time.Time, backend string, stats map[string]*mo
 	}
 	defer storage.Close()
 
-	intervalSec := getEnvInt("QUERY_RUNNER_INTERVAL_SEC", 2)
-
 	for time.Now().Before(deadline) {
-		execQuery(stats["search_by_host"], backend, "search_by_host", func() error {
-			_, err := storage.SearchByHost(context.Background(), "host-1", 100)
-			return err
-		})
+		for _, q := range workload.Queries {
+			if !q.Enabled {
+				continue
+			}
 
-		execQuery(stats["search_by_user"], backend, "search_by_user", func() error {
-			_, err := storage.SearchByUser(context.Background(), "admin", 100)
-			return err
-		})
+			switch q.Type {
+			case "search_by_host":
+				acc := stats[q.Name]
+				execQuery(acc, backend, q.Name, func() error {
+					_, err := storage.SearchByHost(context.Background(), q.Value, q.Limit)
+					return err
+				}, collectStats)
 
-		execQuery(stats["count_by_severity"], backend, "count_by_severity", func() error {
-			_, err := storage.CountBySeverity(context.Background())
-			return err
-		})
+			case "search_by_user":
+				acc := stats[q.Name]
+				execQuery(acc, backend, q.Name, func() error {
+					_, err := storage.SearchByUser(context.Background(), q.Value, q.Limit)
+					return err
+				}, collectStats)
 
-		execQuery(stats["top_hosts"], backend, "top_hosts", func() error {
-			_, err := storage.TopHosts(context.Background(), 10)
-			return err
-		})
+			case "count_by_severity":
+				acc := stats[q.Name]
+				execQuery(acc, backend, q.Name, func() error {
+					_, err := storage.CountBySeverity(context.Background())
+					return err
+				}, collectStats)
+
+			case "top_hosts":
+				acc := stats[q.Name]
+				execQuery(acc, backend, q.Name, func() error {
+					_, err := storage.TopHosts(context.Background(), q.Limit)
+					return err
+				}, collectStats)
+
+			default:
+				log.Printf("unknown workload query type: %s", q.Type)
+			}
+		}
 
 		time.Sleep(time.Duration(intervalSec) * time.Second)
 	}
 }
 
-func runClickHouseQueries(deadline time.Time, backend string, stats map[string]*model.QueryAccumulator, dsn string) {
+func runWorkloadClickHouse(workload model.QueryWorkload, backend string, stats map[string]*model.QueryAccumulator, dsn string, intervalSec int, deadline time.Time, collectStats bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	storage, err := chstorage.New(ctx, dsn)
 	cancel()
@@ -123,34 +123,51 @@ func runClickHouseQueries(deadline time.Time, backend string, stats map[string]*
 		}
 	}()
 
-	intervalSec := getEnvInt("QUERY_RUNNER_INTERVAL_SEC", 2)
-
 	for time.Now().Before(deadline) {
-		execQuery(stats["search_by_host"], backend, "search_by_host", func() error {
-			_, err := storage.SearchByHost(context.Background(), "host-1", 100)
-			return err
-		})
+		for _, q := range workload.Queries {
+			if !q.Enabled {
+				continue
+			}
 
-		execQuery(stats["search_by_user"], backend, "search_by_user", func() error {
-			_, err := storage.SearchByUser(context.Background(), "admin", 100)
-			return err
-		})
+			switch q.Type {
+			case "search_by_host":
+				acc := stats[q.Name]
+				execQuery(acc, backend, q.Name, func() error {
+					_, err := storage.SearchByHost(context.Background(), q.Value, q.Limit)
+					return err
+				}, collectStats)
 
-		execQuery(stats["count_by_severity"], backend, "count_by_severity", func() error {
-			_, err := storage.CountBySeverity(context.Background())
-			return err
-		})
+			case "search_by_user":
+				acc := stats[q.Name]
+				execQuery(acc, backend, q.Name, func() error {
+					_, err := storage.SearchByUser(context.Background(), q.Value, q.Limit)
+					return err
+				}, collectStats)
 
-		execQuery(stats["top_hosts"], backend, "top_hosts", func() error {
-			_, err := storage.TopHosts(context.Background(), 10)
-			return err
-		})
+			case "count_by_severity":
+				acc := stats[q.Name]
+				execQuery(acc, backend, q.Name, func() error {
+					_, err := storage.CountBySeverity(context.Background())
+					return err
+				}, collectStats)
+
+			case "top_hosts":
+				acc := stats[q.Name]
+				execQuery(acc, backend, q.Name, func() error {
+					_, err := storage.TopHosts(context.Background(), q.Limit)
+					return err
+				}, collectStats)
+
+			default:
+				log.Printf("unknown workload query type: %s", q.Type)
+			}
+		}
 
 		time.Sleep(time.Duration(intervalSec) * time.Second)
 	}
 }
 
-func runElasticsearchQueries(deadline time.Time, backend string, stats map[string]*model.QueryAccumulator, url string) {
+func runWorkloadElasticsearch(workload model.QueryWorkload, backend string, stats map[string]*model.QueryAccumulator, url string, intervalSec int, deadline time.Time, collectStats bool) {
 	storage, err := esstorage.New(url)
 	if err != nil {
 		log.Fatalf("elasticsearch connect failed: %v", err)
@@ -161,31 +178,73 @@ func runElasticsearchQueries(deadline time.Time, backend string, stats map[strin
 		}
 	}()
 
-	intervalSec := getEnvInt("QUERY_RUNNER_INTERVAL_SEC", 2)
-
 	for time.Now().Before(deadline) {
-		execQuery(stats["search_by_host"], backend, "search_by_host", func() error {
-			_, err := storage.SearchByHost(context.Background(), "host-1", 100)
-			return err
-		})
+		for _, q := range workload.Queries {
+			if !q.Enabled {
+				continue
+			}
 
-		execQuery(stats["search_by_user"], backend, "search_by_user", func() error {
-			_, err := storage.SearchByUser(context.Background(), "admin", 100)
-			return err
-		})
+			switch q.Type {
+			case "search_by_host":
+				acc := stats[q.Name]
+				execQuery(acc, backend, q.Name, func() error {
+					_, err := storage.SearchByHost(context.Background(), q.Value, q.Limit)
+					return err
+				}, collectStats)
 
-		execQuery(stats["count_by_severity"], backend, "count_by_severity", func() error {
-			_, err := storage.CountBySeverity(context.Background())
-			return err
-		})
+			case "search_by_user":
+				acc := stats[q.Name]
+				execQuery(acc, backend, q.Name, func() error {
+					_, err := storage.SearchByUser(context.Background(), q.Value, q.Limit)
+					return err
+				}, collectStats)
 
-		execQuery(stats["top_hosts"], backend, "top_hosts", func() error {
-			_, err := storage.TopHosts(context.Background(), 10)
-			return err
-		})
+			case "count_by_severity":
+				acc := stats[q.Name]
+				execQuery(acc, backend, q.Name, func() error {
+					_, err := storage.CountBySeverity(context.Background())
+					return err
+				}, collectStats)
+
+			case "top_hosts":
+				acc := stats[q.Name]
+				execQuery(acc, backend, q.Name, func() error {
+					_, err := storage.TopHosts(context.Background(), q.Limit)
+					return err
+				}, collectStats)
+
+			default:
+				log.Printf("unknown workload query type: %s", q.Type)
+			}
+		}
 
 		time.Sleep(time.Duration(intervalSec) * time.Second)
 	}
+}
+
+func runConcurrent(workload model.QueryWorkload, backend string, stats map[string]*model.QueryAccumulator, cfg config.Config, intervalSec int, deadline time.Time, collectStats bool, concurrency int) {
+	var wg sync.WaitGroup
+
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+
+		go func(workerNum int) {
+			defer wg.Done()
+
+			switch backend {
+			case "postgres":
+				runWorkloadPostgres(workload, backend, stats, cfg.PostgresDSN, intervalSec, deadline, collectStats)
+			case "clickhouse":
+				runWorkloadClickHouse(workload, backend, stats, cfg.ClickHouseDSN, intervalSec, deadline, collectStats)
+			case "elasticsearch":
+				runWorkloadElasticsearch(workload, backend, stats, cfg.ElasticsearchURL, intervalSec, deadline, collectStats)
+			default:
+				log.Printf("unsupported QUERY_BACKEND in worker %d: %s", workerNum, backend)
+			}
+		}(i + 1)
+	}
+
+	wg.Wait()
 }
 
 func main() {
@@ -193,7 +252,31 @@ func main() {
 	metrics.MustRegister()
 
 	durationSec := getEnvInt("QUERY_RUNNER_DURATION_SEC", 10)
-	backend := cfg.GeneratorBackend
+	intervalSec := getEnvInt("QUERY_RUNNER_INTERVAL_SEC", 2)
+	warmupSec := getEnvInt("QUERY_RUNNER_WARMUP_SEC", 3)
+	concurrency := getEnvInt("QUERY_RUNNER_CONCURRENCY", 1)
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+
+	backend := cfg.QueryBackend
+	runScenario := cfg.RunScenario
+	if runScenario == "" {
+		runScenario = "query-only"
+	}
+
+	workload, err := model.LoadQueryWorkload(cfg.QueryWorkloadPath)
+	if err != nil {
+		log.Fatalf("failed to load query workload: %v", err)
+	}
+
+	metrics.RunInfo.WithLabelValues(
+		backend,
+		runScenario,
+		"query",
+		"none",
+		"none",
+	).Set(1)
 
 	go func() {
 		mux := http.NewServeMux()
@@ -205,33 +288,35 @@ func main() {
 		}
 	}()
 
-	stats := map[string]*model.QueryAccumulator{
-		"search_by_host":    {Name: "search_by_host"},
-		"search_by_user":    {Name: "search_by_user"},
-		"count_by_severity": {Name: "count_by_severity"},
-		"top_hosts":         {Name: "top_hosts"},
+	stats := make(map[string]*model.QueryAccumulator)
+	resultWorkload := make([]model.QueryWorkloadItem, 0, len(workload.Queries))
+
+	for _, q := range workload.Queries {
+		resultWorkload = append(resultWorkload, q)
+		if q.Enabled {
+			stats[q.Name] = &model.QueryAccumulator{Name: q.Name}
+		}
 	}
 
 	startedAt := time.Now().UTC()
 	runID := startedAt.Format("20060102-150405")
-	deadline := time.Now().Add(time.Duration(durationSec) * time.Second)
 
-	log.Printf("query-runner started: backend=%s duration=%ds interval=%ds",
-		backend,
-		durationSec,
-		getEnvInt("QUERY_RUNNER_INTERVAL_SEC", 2),
+	log.Printf(
+		"query-runner started: backend=%s duration=%ds interval=%ds warmup=%ds concurrency=%d scenario=%s workload=%s",
+		backend, durationSec, intervalSec, warmupSec, concurrency, runScenario, workload.Name,
 	)
 
-	switch backend {
-	case "postgres":
-		runPostgresQueries(deadline, backend, stats, cfg.PostgresDSN)
-	case "clickhouse":
-		runClickHouseQueries(deadline, backend, stats, cfg.ClickHouseDSN)
-	case "elasticsearch":
-		runElasticsearchQueries(deadline, backend, stats, cfg.ElasticsearchURL)
-	default:
-		log.Fatalf("unsupported GENERATOR_BACKEND: %s", backend)
+	if warmupSec > 0 {
+		warmupDeadline := time.Now().Add(time.Duration(warmupSec) * time.Second)
+		log.Printf("starting warm-up phase for %ds", warmupSec)
+
+		runConcurrent(workload, backend, stats, cfg, intervalSec, warmupDeadline, false, concurrency)
+
+		log.Printf("warm-up phase finished")
 	}
+
+	measureDeadline := time.Now().Add(time.Duration(durationSec) * time.Second)
+	runConcurrent(workload, backend, stats, cfg, intervalSec, measureDeadline, true, concurrency)
 
 	finishedAt := time.Now().UTC()
 
@@ -249,19 +334,39 @@ func main() {
 	result := model.QueryRunResult{
 		RunID:         runID,
 		Backend:       backend,
-		DurationSec:   durationSec,
 		TotalQueries:  totalQueries,
 		FailedQueries: failedQueries,
-		StartedAt:     startedAt,
-		FinishedAt:    finishedAt,
-		Queries:       queryStats,
+		Notes:         cfg.RunTag,
+		ConfigSnapshot: model.QueryConfigSnapshot{
+			Backend:      backend,
+			DurationSec:  durationSec,
+			IntervalSec:  intervalSec,
+			WarmupSec:    warmupSec,
+			Concurrency:  concurrency,
+			RunScenario:  runScenario,
+			WorkloadName: workload.Name,
+			WorkloadPath: cfg.QueryWorkloadPath,
+		},
+		Workload:   resultWorkload,
+		StartedAt:  startedAt,
+		FinishedAt: finishedAt,
+		Queries:    queryStats,
 	}
 
-	resultPath := fmt.Sprintf("results/query-%s-%s.json", backend, runID)
-	if err := saveQueryResult(resultPath, result); err != nil {
+	resultPath := ""
+	switch runScenario {
+	case "mixed":
+		resultPath = fmt.Sprintf("results/mixed/query-%s-%s.json", backend, runID)
+	default:
+		resultPath = fmt.Sprintf("results/query/query-%s-%s.json", backend, runID)
+	}
+
+	if err := model.SaveQueryRunResult(resultPath, result); err != nil {
 		log.Fatalf("failed to save query result file: %v", err)
 	}
 
-	log.Printf("query-runner finished: backend=%s total_queries=%d failed_queries=%d result=%s",
-		backend, totalQueries, failedQueries, resultPath)
+	log.Printf(
+		"query-runner finished: backend=%s total_queries=%d failed_queries=%d workload=%s concurrency=%d result=%s",
+		backend, totalQueries, failedQueries, workload.Name, concurrency, resultPath,
+	)
 }

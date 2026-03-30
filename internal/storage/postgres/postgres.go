@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"siem-bench/internal/model"
@@ -30,6 +31,47 @@ func New(ctx context.Context, dsn string) (*Storage, error) {
 
 func (s *Storage) Close() {
 	s.pool.Close()
+}
+
+func (s *Storage) InsertEventsBatch(ctx context.Context, events []model.Event) error {
+	if len(events) == 0 {
+		return nil
+	}
+
+	batch := &pgx.Batch{}
+	for _, event := range events {
+		batch.Queue(`
+			INSERT INTO events (
+				id, timestamp, source_type, host, user_name, src_ip, dst_ip, event_code, severity, message, raw
+			) VALUES (
+				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+			)
+			ON CONFLICT (id) DO NOTHING
+		`,
+			event.ID,
+			event.Timestamp,
+			event.SourceType,
+			event.Host,
+			event.UserName,
+			event.SrcIP,
+			event.DstIP,
+			event.EventCode,
+			event.Severity,
+			event.Message,
+			event.Raw,
+		)
+	}
+
+	results := s.pool.SendBatch(ctx, batch)
+	defer results.Close()
+
+	for range events {
+		if _, err := results.Exec(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s *Storage) InsertEvent(ctx context.Context, event model.Event) error {

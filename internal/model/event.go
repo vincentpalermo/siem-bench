@@ -14,4 +14,7 @@ type Event struct {
 	Severity   int       `json:"severity"`
 	Message    string    `json:"message"`
 	Raw        string    `json:"raw"`
+
+	GeneratedAt time.Time `json:"generated_at,omitempty"`
+	IngestedAt  time.Time `json:"ingested_at,omitempty"`
 }

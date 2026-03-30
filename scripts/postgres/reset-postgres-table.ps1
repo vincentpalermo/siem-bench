@@ -1,1 +1,0 @@
-docker exec -it siem-postgres psql -U siem -d siem -c "TRUNCATE TABLE events;"

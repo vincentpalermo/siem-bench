@@ -1,1 +1,0 @@
-docker exec -it siem-clickhouse clickhouse-client --user siem --password siem --query "TRUNCATE TABLE siem.events"

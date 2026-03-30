@@ -1,15 +1,16 @@
-$projectRoot = "C:\Users\Vlad\Desktop\siem-bench"
+$ErrorActionPreference = "Stop"
 
-Write-Host "Stopping SIEM bench infrastructure..." -ForegroundColor Cyan
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = Resolve-Path (Join-Path $scriptDir "..")
 
-Set-Location $projectRoot
+Write-Host "Repository root: $repoRoot"
+Write-Host "Stopping infrastructure from $repoRoot ..." -ForegroundColor Yellow
 
-docker compose -f deploy/docker-compose.yml down
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Failed to stop Docker infrastructure." -ForegroundColor Red
-    exit 1
+Push-Location $repoRoot
+try {
+    docker compose -f deploy/docker-compose.yml down
+    Write-Host "Infrastructure stopped." -ForegroundColor Green
 }
-
-Write-Host ""
-Write-Host "Infrastructure stopped." -ForegroundColor Green
+finally {
+    Pop-Location
+}
