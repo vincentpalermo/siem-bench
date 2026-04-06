@@ -31,4 +31,27 @@ type RunResult struct {
 	ConfigSnapshot RunConfigSnapshot `json:"config_snapshot"`
 	StartedAt      time.Time         `json:"started_at"`
 	FinishedAt     time.Time         `json:"finished_at"`
+
+	StreamLenAtSendFinish int64   `json:"stream_len_at_send_finish"`
+	PendingAtSendFinish   int64   `json:"pending_at_send_finish"`
+	DBCountAtSendFinish   int64   `json:"db_count_at_send_finish"`
+
+	StreamLenAtFinish int64 `json:"stream_len_at_finish"`
+	PendingAtFinish   int64 `json:"pending_at_finish"`
+
+	E2ELatencyAvgMs   float64 `json:"e2e_latency_avg_ms"`
+	E2ELatencyP95Ms   float64 `json:"e2e_latency_p95_ms"`
+	E2ELatencyP99Ms   float64 `json:"e2e_latency_p99_ms"`
+	QueueLatencyAvgMs float64 `json:"queue_latency_avg_ms"`
+	QueueLatencyP95Ms float64 `json:"queue_latency_p95_ms"`
+	QueueLatencyP99Ms float64 `json:"queue_latency_p99_ms"`
+
+	SystemCPUAvgPercent    float64 `json:"system_cpu_avg_percent"`
+	SystemCPUMaxPercent    float64 `json:"system_cpu_max_percent"`
+	SystemMemoryAvgMB      float64 `json:"system_memory_avg_mb"`
+	SystemMemoryMaxMB      float64 `json:"system_memory_max_mb"`
+	SystemDiskReadMB       float64 `json:"system_disk_read_mb"`
+	SystemDiskWriteMB      float64 `json:"system_disk_write_mb"`
+	SystemNetRxMB          float64 `json:"system_net_rx_mb"`
+	SystemNetTxMB          float64 `json:"system_net_tx_mb"`
 }

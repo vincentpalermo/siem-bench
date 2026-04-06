@@ -1,0 +1,31 @@
+{
+  "name": "heavy-query-workload",
+  "queries": [
+    {
+      "name": "search_by_host_large",
+      "type": "search_by_host",
+      "value": "host-1",
+      "limit": 1000,
+      "enabled": true
+    },
+    {
+      "name": "search_by_user_large",
+      "type": "search_by_user",
+      "value": "admin",
+      "limit": 1000,
+      "enabled": true
+    },
+    {
+      "name": "count_by_severity",
+      "type": "count_by_severity",
+      "limit": 0,
+      "enabled": true
+    },
+    {
+      "name": "top_hosts_large",
+      "type": "top_hosts",
+      "limit": 100,
+      "enabled": true
+    }
+  ]
+}

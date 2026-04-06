@@ -15,6 +15,7 @@ import (
 	"siem-bench/internal/config"
 	"siem-bench/internal/metrics"
 	"siem-bench/internal/model"
+	"siem-bench/internal/reporting"
 	chstorage "siem-bench/internal/storage/clickhouse"
 	esstorage "siem-bench/internal/storage/elasticsearch"
 	pgstorage "siem-bench/internal/storage/postgres"
@@ -320,6 +321,11 @@ func main() {
 
 	finishedAt := time.Now().UTC()
 
+	sysSnap, err := reporting.FetchSystemMetricsForRun(backend, startedAt, finishedAt)
+	if err != nil {
+		log.Printf("failed to fetch system metrics: %v", err)
+	}
+
 	queryStats := make([]model.QueryStat, 0, len(stats))
 	totalQueries := 0
 	failedQueries := 0
@@ -337,6 +343,14 @@ func main() {
 		TotalQueries:  totalQueries,
 		FailedQueries: failedQueries,
 		Notes:         cfg.RunTag,
+		SystemCPUAvgPercent: sysSnap.CPUAvgPercent,
+		SystemCPUMaxPercent: sysSnap.CPUMaxPercent,
+		SystemMemoryAvgMB:   sysSnap.MemoryAvgMB,
+		SystemMemoryMaxMB:   sysSnap.MemoryMaxMB,
+		SystemDiskReadMB:    sysSnap.DiskReadMB,
+		SystemDiskWriteMB:   sysSnap.DiskWriteMB,
+		SystemNetRxMB:       sysSnap.NetRxMB,
+		SystemNetTxMB:       sysSnap.NetTxMB,
 		ConfigSnapshot: model.QueryConfigSnapshot{
 			Backend:      backend,
 			DurationSec:  durationSec,

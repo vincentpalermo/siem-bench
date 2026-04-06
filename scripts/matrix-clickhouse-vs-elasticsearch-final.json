@@ -1,0 +1,66 @@
+{
+  "defaults": {
+    "duration_sec": 180,
+    "query_interval_sec": 1,
+    "query_warmup_sec": 5,
+    "query_concurrency": 4,
+    "worker_read_count": 200,
+    "batch": 50,
+    "write_mode": "batch",
+    "repeats": 3,
+    "sleep_after_start_sec": 6,
+    "sleep_after_stop_sec": 3,
+    "build_summary": true,
+    "reset_storage_each_run": true
+  },
+  "runs": [
+    {
+      "backend": "clickhouse",
+      "mode": "ingest",
+      "eps": [2000, 4000, 8000],
+      "batch": 50,
+      "write_modes": ["batch"]
+    },
+    {
+      "backend": "elasticsearch",
+      "mode": "ingest",
+      "eps": [2000, 4000, 8000],
+      "batch": 50,
+      "write_modes": ["batch"]
+    },
+    {
+      "backend": "clickhouse",
+      "mode": "query",
+      "duration_sec": 180,
+      "query_concurrency": [4, 8, 16],
+      "query_workload_path": "scenarios/query-heavy.json"
+    },
+    {
+      "backend": "elasticsearch",
+      "mode": "query",
+      "duration_sec": 180,
+      "query_concurrency": [4, 8, 16],
+      "query_workload_path": "scenarios/query-heavy.json"
+    },
+    {
+      "backend": "clickhouse",
+      "mode": "mixed",
+      "duration_sec": 180,
+      "eps": [2000, 4000],
+      "batch": 50,
+      "write_modes": ["batch"],
+      "query_concurrency": [4, 8, 16],
+      "query_workload_path": "scenarios/query-heavy.json"
+    },
+    {
+      "backend": "elasticsearch",
+      "mode": "mixed",
+      "duration_sec": 180,
+      "eps": [2000, 4000],
+      "batch": 50,
+      "write_modes": ["batch"],
+      "query_concurrency": [4, 8, 16],
+      "query_workload_path": "scenarios/query-heavy.json"
+    }
+  ]
+}

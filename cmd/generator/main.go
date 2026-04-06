@@ -15,6 +15,8 @@ import (
 	"siem-bench/internal/buffer"
 	"siem-bench/internal/config"
 	"siem-bench/internal/model"
+	"siem-bench/internal/reporting"
+
 	chstorage "siem-bench/internal/storage/clickhouse"
 	esstorage "siem-bench/internal/storage/elasticsearch"
 	pgstorage "siem-bench/internal/storage/postgres"
@@ -257,6 +259,10 @@ func main() {
 
 	sendFinishedAt := time.Now().UTC()
 
+	streamLenAtSendFinish, _ := buf.StreamLen(context.Background())
+	pendingAtSendFinish, _ := buf.PendingCount(context.Background(), cfg.RedisGroup)
+	dbCountAtSendFinish, _ := db.CountEvents(context.Background())
+
 	dbCountAfter, err := waitForDrain(cfg, db, buf)
 	if err != nil {
 		log.Fatalf("wait for drain failed: %v", err)
@@ -264,7 +270,20 @@ func main() {
 
 	finishedAt := time.Now().UTC()
 
+	e2eSnap, queueSnap, err := reporting.FetchWorkerLatencySnapshots(backend)
+	if err != nil {
+		log.Printf("failed to fetch worker latency snapshots: %v", err)
+	}
+
+	sysSnap, err := reporting.FetchSystemMetricsForRun(backend, startedAt, finishedAt)
+	if err != nil {
+		log.Printf("failed to fetch system metrics: %v", err)
+	}
+
 	dbInserted := dbCountAfter - dbCountBefore
+
+	streamLenAtFinish, _ := buf.StreamLen(context.Background())
+	pendingAtFinish, _ := buf.PendingCount(context.Background(), cfg.RedisGroup)
 
 	sendElapsedSec := sendFinishedAt.Sub(startedAt).Seconds()
 	if sendElapsedSec < 0 {
@@ -315,6 +334,25 @@ func main() {
 		TotalElapsedSec:      totalElapsedSec,
 		DrainWaitSec:         drainWaitSec,
 		LossPercent:          lossPercent,
+		StreamLenAtSendFinish: streamLenAtSendFinish,
+		PendingAtSendFinish:   pendingAtSendFinish,
+		DBCountAtSendFinish:   dbCountAtSendFinish,
+		StreamLenAtFinish:     streamLenAtFinish,
+		PendingAtFinish:       pendingAtFinish,
+		E2ELatencyAvgMs:   e2eSnap.AvgMs,
+		E2ELatencyP95Ms:   e2eSnap.P95Ms,
+		E2ELatencyP99Ms:   e2eSnap.P99Ms,
+		QueueLatencyAvgMs: queueSnap.AvgMs,
+		QueueLatencyP95Ms: queueSnap.P95Ms,
+		QueueLatencyP99Ms: queueSnap.P99Ms,
+		SystemCPUAvgPercent: sysSnap.CPUAvgPercent,
+		SystemCPUMaxPercent: sysSnap.CPUMaxPercent,
+		SystemMemoryAvgMB:   sysSnap.MemoryAvgMB,
+		SystemMemoryMaxMB:   sysSnap.MemoryMaxMB,
+		SystemDiskReadMB:    sysSnap.DiskReadMB,
+		SystemDiskWriteMB:   sysSnap.DiskWriteMB,
+		SystemNetRxMB:       sysSnap.NetRxMB,
+		SystemNetTxMB:       sysSnap.NetTxMB,
 
 		Notes:          cfg.RunTag,
 		ConfigSnapshot: model.RunConfigSnapshot{

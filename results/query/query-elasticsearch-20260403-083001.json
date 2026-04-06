@@ -1,0 +1,92 @@
+{
+  "run_id": "20260403-083001",
+  "backend": "elasticsearch",
+  "total_queries": 11392,
+  "failed_queries": 0,
+  "notes": "elasticsearch-query-q16-r3",
+  "config_snapshot": {
+    "backend": "elasticsearch",
+    "duration_sec": 180,
+    "interval_sec": 1,
+    "warmup_sec": 5,
+    "concurrency": 16,
+    "run_scenario": "query-only",
+    "workload_name": "heavy-query-workload",
+    "workload_path": "scenarios/query-heavy.json"
+  },
+  "workload": [
+    {
+      "name": "search_by_host_large",
+      "type": "search_by_host",
+      "value": "host-1",
+      "limit": 1000,
+      "enabled": true
+    },
+    {
+      "name": "search_by_user_large",
+      "type": "search_by_user",
+      "value": "admin",
+      "limit": 1000,
+      "enabled": true
+    },
+    {
+      "name": "count_by_severity",
+      "type": "count_by_severity",
+      "enabled": true
+    },
+    {
+      "name": "top_hosts_large",
+      "type": "top_hosts",
+      "limit": 100,
+      "enabled": true
+    }
+  ],
+  "started_at": "2026-04-03T08:30:01.8216837Z",
+  "finished_at": "2026-04-03T08:33:07.6211061Z",
+  "queries": [
+    {
+      "name": "search_by_host_large",
+      "count": 2848,
+      "failed": 0,
+      "avg_duration_ms": 3.3672752808988866,
+      "max_duration_ms": 51.49,
+      "min_duration_ms": 0.524,
+      "last_duration_ms": 2.31
+    },
+    {
+      "name": "search_by_user_large",
+      "count": 2848,
+      "failed": 0,
+      "avg_duration_ms": 3.107469803370787,
+      "max_duration_ms": 28.082,
+      "min_duration_ms": 0.53,
+      "last_duration_ms": 2.711
+    },
+    {
+      "name": "count_by_severity",
+      "count": 2848,
+      "failed": 0,
+      "avg_duration_ms": 3.255725421348312,
+      "max_duration_ms": 43.865,
+      "min_duration_ms": 0.927,
+      "last_duration_ms": 3.538
+    },
+    {
+      "name": "top_hosts_large",
+      "count": 2848,
+      "failed": 0,
+      "avg_duration_ms": 3.175063553370784,
+      "max_duration_ms": 51.32,
+      "min_duration_ms": 0.668,
+      "last_duration_ms": 2.883
+    }
+  ],
+  "system_cpu_avg_percent": 0,
+  "system_cpu_max_percent": 0,
+  "system_memory_avg_mb": 0,
+  "system_memory_max_mb": 0,
+  "system_disk_read_mb": 0,
+  "system_disk_write_mb": 0,
+  "system_net_rx_mb": 0,
+  "system_net_tx_mb": 0
+}

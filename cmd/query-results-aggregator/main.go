@@ -83,6 +83,14 @@ func main() {
 		"failed_queries",
 		"started_at",
 		"finished_at",
+		"system_cpu_avg_percent",
+		"system_cpu_max_percent",
+		"system_memory_avg_mb",
+		"system_memory_max_mb",
+		"system_disk_read_mb",
+		"system_disk_write_mb",
+		"system_net_rx_mb",
+		"system_net_tx_mb",
 	}
 	if err := w.Write(header); err != nil {
 		log.Fatalf("failed to write CSV header: %v", err)
@@ -101,6 +109,14 @@ func main() {
 			run.ConfigSnapshot.WorkloadPath,
 			strconv.Itoa(run.TotalQueries),
 			strconv.Itoa(run.FailedQueries),
+			strconv.FormatFloat(run.SystemCPUAvgPercent, 'f', 4, 64),
+			strconv.FormatFloat(run.SystemCPUMaxPercent, 'f', 4, 64),
+			strconv.FormatFloat(run.SystemMemoryAvgMB, 'f', 4, 64),
+			strconv.FormatFloat(run.SystemMemoryMaxMB, 'f', 4, 64),
+			strconv.FormatFloat(run.SystemDiskReadMB, 'f', 4, 64),
+			strconv.FormatFloat(run.SystemDiskWriteMB, 'f', 4, 64),
+			strconv.FormatFloat(run.SystemNetRxMB, 'f', 4, 64),
+			strconv.FormatFloat(run.SystemNetTxMB, 'f', 4, 64),
 			run.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
 			run.FinishedAt.Format("2006-01-02T15:04:05Z07:00"),
 		}

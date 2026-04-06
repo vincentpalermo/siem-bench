@@ -47,6 +47,39 @@ function Ensure-Array {
     return @($Value)
 }
 
+function Test-RunAlreadyCompleted {
+    param(
+        [string]$RunTag
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RunTag)) {
+        return $false
+    }
+
+    $patterns = @(
+        ".\results\ingest\*.json",
+        ".\results\query\*.json",
+        ".\results\mixed\*.json"
+    )
+
+    foreach ($pattern in $patterns) {
+        $files = Get-ChildItem -Path $pattern -File -ErrorAction SilentlyContinue
+        foreach ($file in $files) {
+            try {
+                $content = Get-Content $file.FullName -Raw -ErrorAction Stop
+                if ($content -match ('"notes"\s*:\s*"' + [regex]::Escape($RunTag) + '"')) {
+                    return $true
+                }
+            }
+            catch {
+                Write-Host "Warning: failed to inspect $($file.FullName): $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
+    }
+
+    return $false
+}
+
 function Stop-GoServices {
     if (Test-Path $stopGoPath) {
         Write-Host "Stopping running Go services..." -ForegroundColor Yellow
@@ -83,6 +116,8 @@ function Reset-StorageForBackend {
             throw "Unsupported backend for reset: $Backend"
         }
     }
+
+    Reset-RedisForBackend -Backend $Backend
 }
 
 function Start-CollectorForBackend {
@@ -287,6 +322,14 @@ function Invoke-MatrixRun {
         $runTag += "-q$QueryConcurrency"
     }
     $runTag += "-r$RepeatIndex"
+
+    if (Test-RunAlreadyCompleted -RunTag $runTag) {
+    Write-Host ""
+    Write-Host "========================================" -ForegroundColor Yellow
+    Write-Host "Skipping already completed run: $runTag" -ForegroundColor Yellow
+    Write-Host "========================================" -ForegroundColor Yellow
+    return
+}
 
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Cyan

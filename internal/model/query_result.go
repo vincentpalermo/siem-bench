@@ -42,4 +42,13 @@ type QueryRunResult struct {
 	StartedAt      time.Time           `json:"started_at"`
 	FinishedAt     time.Time           `json:"finished_at"`
 	Queries        []QueryStat         `json:"queries"`
+
+	SystemCPUAvgPercent float64 `json:"system_cpu_avg_percent"`
+	SystemCPUMaxPercent float64 `json:"system_cpu_max_percent"`
+	SystemMemoryAvgMB   float64 `json:"system_memory_avg_mb"`
+	SystemMemoryMaxMB   float64 `json:"system_memory_max_mb"`
+	SystemDiskReadMB    float64 `json:"system_disk_read_mb"`
+	SystemDiskWriteMB   float64 `json:"system_disk_write_mb"`
+	SystemNetRxMB       float64 `json:"system_net_rx_mb"`
+	SystemNetTxMB       float64 `json:"system_net_tx_mb"`
 }
