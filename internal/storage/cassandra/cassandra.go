@@ -2,6 +2,7 @@ package cassandra
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"time"
 
@@ -161,27 +162,61 @@ func scanEventResults(iter *gocql.Iter) ([]model.EventQueryResult, error) {
 }
 
 func (s *Storage) CountBySeverity(ctx context.Context) ([]model.SeverityCount, error) {
-	iter := s.session.Query(`SELECT severity, COUNT(*) FROM events GROUP BY severity`).WithContext(ctx).Iter()
+	iter := s.session.Query(`SELECT severity FROM events`).WithContext(ctx).Iter()
 
-	var results []model.SeverityCount
-	var item model.SeverityCount
-	for iter.Scan(&item.Severity, &item.Count) {
-		results = append(results, item)
-		item = model.SeverityCount{}
+	counts := map[int]int64{}
+	var severity int
+	for iter.Scan(&severity) {
+		counts[severity]++
+	}
+	if err := iter.Close(); err != nil {
+		return nil, err
 	}
 
-	return results, iter.Close()
+	severities := make([]int, 0, len(counts))
+	for severity := range counts {
+		severities = append(severities, severity)
+	}
+	sort.Ints(severities)
+
+	results := make([]model.SeverityCount, 0, len(severities))
+	for _, severity := range severities {
+		results = append(results, model.SeverityCount{
+			Severity: severity,
+			Count:    counts[severity],
+		})
+	}
+
+	return results, nil
 }
 
 func (s *Storage) TopHosts(ctx context.Context, limit int) ([]model.HostCount, error) {
-	iter := s.session.Query(`SELECT host, COUNT(*) FROM events GROUP BY host LIMIT ?`, limit).WithContext(ctx).Iter()
+	iter := s.session.Query(`SELECT host FROM events`).WithContext(ctx).Iter()
 
-	var results []model.HostCount
-	var item model.HostCount
-	for iter.Scan(&item.Host, &item.Count) {
-		results = append(results, item)
-		item = model.HostCount{}
+	counts := map[string]int64{}
+	var host string
+	for iter.Scan(&host) {
+		counts[host]++
+	}
+	if err := iter.Close(); err != nil {
+		return nil, err
 	}
 
-	return results, iter.Close()
+	results := make([]model.HostCount, 0, len(counts))
+	for host, count := range counts {
+		results = append(results, model.HostCount{Host: host, Count: count})
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].Count == results[j].Count {
+			return results[i].Host < results[j].Host
+		}
+		return results[i].Count > results[j].Count
+	})
+
+	if limit > 0 && len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, nil
 }
