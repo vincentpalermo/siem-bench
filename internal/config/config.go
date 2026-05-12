@@ -13,6 +13,8 @@ type Config struct {
 	PostgresDSN      string
 	ClickHouseDSN    string
 	ElasticsearchURL string
+	CassandraHosts   string
+	CassandraKeyspace string
 
 	CollectorURL string
 
@@ -38,8 +40,8 @@ type Config struct {
 	RunScenario   string
 	RunTag        string
 
-	QueryRunnerWarmupSec string
-	QueryWorkloadPath    string
+	QueryRunnerWarmupSec  string
+	QueryWorkloadPath     string
 	QueryRunnerConcurrency string
 }
 
@@ -62,9 +64,11 @@ func Load() Config {
 		RedisGroup:    getEnv("REDIS_GROUP", "workers"),
 		RedisConsumer: getEnv("REDIS_CONSUMER", "worker-1"),
 
-		PostgresDSN:      getEnv("POSTGRES_DSN", "postgres://siem:siem@localhost:5432/siem?sslmode=disable"),
-		ClickHouseDSN:    getEnv("CLICKHOUSE_DSN", "clickhouse://localhost:9000?database=siem"),
-		ElasticsearchURL: getEnv("ELASTICSEARCH_URL", "http://127.0.0.1:9200"),
+		PostgresDSN:       getEnv("POSTGRES_DSN", "postgres://siem:siem@localhost:5432/siem?sslmode=disable"),
+		ClickHouseDSN:     getEnv("CLICKHOUSE_DSN", "clickhouse://localhost:9000?database=siem"),
+		ElasticsearchURL:  getEnv("ELASTICSEARCH_URL", "http://127.0.0.1:9200"),
+		CassandraHosts:    getEnv("CASSANDRA_HOSTS", "127.0.0.1:9042"),
+		CassandraKeyspace: getEnv("CASSANDRA_KEYSPACE", "siem"),
 
 		CollectorURL: getEnv("COLLECTOR_URL", "http://localhost:8080/ingest"),
 
@@ -86,8 +90,8 @@ func Load() Config {
 		RunScenario:   getEnv("RUN_SCENARIO", ""),
 		RunTag:        getEnv("RUN_TAG", ""),
 
-		QueryRunnerWarmupSec: getEnv("QUERY_RUNNER_WARMUP_SEC", "3"),
-		QueryWorkloadPath:    getEnv("QUERY_WORKLOAD_PATH", "scenarios/query-default.json"),
+		QueryRunnerWarmupSec:   getEnv("QUERY_RUNNER_WARMUP_SEC", "3"),
+		QueryWorkloadPath:      getEnv("QUERY_WORKLOAD_PATH", "scenarios/query-default.json"),
 		QueryRunnerConcurrency: getEnv("QUERY_RUNNER_CONCURRENCY", "1"),
 	}
 }
