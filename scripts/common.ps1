@@ -11,6 +11,48 @@ function Leave-RepoRoot {
     Pop-Location
 }
 
+function Get-RedisStreamForBackend {
+    param(
+        [ValidateSet("postgres", "clickhouse", "elasticsearch", "cassandra")]
+        [string]$Backend
+    )
+
+    switch ($Backend) {
+        "postgres"      { return "events-postgres" }
+        "clickhouse"    { return "events-clickhouse" }
+        "elasticsearch" { return "events-elasticsearch" }
+        "cassandra"     { return "events-cassandra" }
+    }
+}
+
+function Get-RedisGroupForBackend {
+    param(
+        [ValidateSet("postgres", "clickhouse", "elasticsearch", "cassandra")]
+        [string]$Backend
+    )
+
+    switch ($Backend) {
+        "postgres"      { return "workers-postgres" }
+        "clickhouse"    { return "workers-clickhouse" }
+        "elasticsearch" { return "workers-elasticsearch" }
+        "cassandra"     { return "workers-cassandra" }
+    }
+}
+
+function Get-RedisConsumerForBackend {
+    param(
+        [ValidateSet("postgres", "clickhouse", "elasticsearch", "cassandra")]
+        [string]$Backend
+    )
+
+    switch ($Backend) {
+        "postgres"      { return "worker-postgres-1" }
+        "clickhouse"    { return "worker-clickhouse-1" }
+        "elasticsearch" { return "worker-elasticsearch-1" }
+        "cassandra"     { return "worker-cassandra-1" }
+    }
+}
+
 function Set-CommonEnv {
     param(
         [string]$RedisAddr = "127.0.0.1:6379",
@@ -78,23 +120,12 @@ function Reset-RedisStream {
 
 function Reset-RedisForBackend {
     param(
+        [ValidateSet("postgres", "clickhouse", "elasticsearch", "cassandra")]
         [string]$Backend
     )
 
-    switch ($Backend) {
-        "postgres" {
-            Reset-RedisStream -StreamName "events-postgres"
-        }
-        "clickhouse" {
-            Reset-RedisStream -StreamName "events-clickhouse"
-        }
-        "elasticsearch" {
-            Reset-RedisStream -StreamName "events-elasticsearch"
-        }
-        default {
-            throw "Unsupported backend for Redis reset: $Backend"
-        }
-    }
+    $stream = Get-RedisStreamForBackend -Backend $Backend
+    Reset-RedisStream -StreamName $stream
 }
 
 function Reset-PostgresTable {
@@ -142,6 +173,19 @@ function Reset-ElasticsearchIndex {
     Write-Host "Elasticsearch index reset: siem-events" -ForegroundColor Cyan
 }
 
+function Reset-CassandraTable {
+    $ddlPath = Join-Path $Script:RepoRoot "migrations\cassandra\001_init.cql"
+
+    if (-not (Test-Path $ddlPath)) {
+        throw "Cassandra CQL file not found: $ddlPath"
+    }
+
+    docker exec -i siem-cassandra cqlsh -e "DROP TABLE IF EXISTS siem.events;" | Out-Null
+    Get-Content $ddlPath -Raw | docker exec -i siem-cassandra cqlsh | Out-Null
+
+    Write-Host "Cassandra table reset: siem.events" -ForegroundColor Cyan
+}
+
 function Start-Collector {
     param(
         [string]$RedisStream,
@@ -163,7 +207,8 @@ function Start-Collector {
 function Start-WorkerPostgres {
     param(
         [string]$WriteMode = "batch",
-        [int]$ReadCount = 100
+        [int]$ReadCount = 100,
+        [string]$Scenario = "ingest-only"
     )
 
     Enter-RepoRoot
@@ -176,7 +221,7 @@ function Start-WorkerPostgres {
         $env:POSTGRES_DSN = "postgres://siem:siem@127.0.0.1:5432/siem?sslmode=disable"
         $env:WORKER_READ_COUNT = "$ReadCount"
         $env:WORKER_WRITE_MODE = $WriteMode
-        $env:RUN_SCENARIO = "ingest-only"
+        $env:RUN_SCENARIO = $Scenario
 
         go run ./cmd/worker-postgres
     }
@@ -187,7 +232,8 @@ function Start-WorkerPostgres {
 
 function Start-WorkerClickHouse {
     param(
-        [int]$ReadCount = 100
+        [int]$ReadCount = 100,
+        [string]$Scenario = "ingest-only"
     )
 
     Enter-RepoRoot
@@ -200,7 +246,7 @@ function Start-WorkerClickHouse {
         $env:CLICKHOUSE_DSN = "clickhouse://siem:siem@127.0.0.1:9000/siem"
         $env:WORKER_READ_COUNT = "$ReadCount"
         $env:WORKER_WRITE_MODE = "batch"
-        $env:RUN_SCENARIO = "ingest-only"
+        $env:RUN_SCENARIO = $Scenario
 
         go run ./cmd/worker-clickhouse
     }
@@ -211,7 +257,8 @@ function Start-WorkerClickHouse {
 
 function Start-WorkerElasticsearch {
     param(
-        [int]$ReadCount = 100
+        [int]$ReadCount = 100,
+        [string]$Scenario = "ingest-only"
     )
 
     Enter-RepoRoot
@@ -224,9 +271,35 @@ function Start-WorkerElasticsearch {
         $env:ELASTICSEARCH_URL = "http://127.0.0.1:9200"
         $env:WORKER_READ_COUNT = "$ReadCount"
         $env:WORKER_WRITE_MODE = "batch"
-        $env:RUN_SCENARIO = "ingest-only"
+        $env:RUN_SCENARIO = $Scenario
 
         go run ./cmd/worker-elasticsearch
+    }
+    finally {
+        Leave-RepoRoot
+    }
+}
+
+function Start-WorkerCassandra {
+    param(
+        [int]$ReadCount = 100,
+        [string]$Scenario = "ingest-only"
+    )
+
+    Enter-RepoRoot
+    try {
+        Set-CommonEnv `
+            -RedisStream "events-cassandra" `
+            -RedisGroup "workers-cassandra" `
+            -RedisConsumer "worker-cassandra-1"
+
+        $env:CASSANDRA_HOSTS = "127.0.0.1:9042"
+        $env:CASSANDRA_KEYSPACE = "siem"
+        $env:WORKER_READ_COUNT = "$ReadCount"
+        $env:WORKER_WRITE_MODE = "batch"
+        $env:RUN_SCENARIO = $Scenario
+
+        go run ./cmd/worker-cassandra
     }
     finally {
         Leave-RepoRoot
@@ -323,6 +396,37 @@ function Start-QueryRunnerElasticsearch {
     }
 }
 
+function Start-QueryRunnerCassandra {
+    param(
+        [int]$DurationSec = 10,
+        [int]$IntervalSec = 1,
+        [int]$WarmupSec = 3,
+        [int]$Concurrency = 1,
+        [string]$WorkloadPath = "scenarios/query-default.json",
+        [string]$Scenario = "query-only",
+        [string]$RunTag = ""
+    )
+
+    Enter-RepoRoot
+    try {
+        $env:QUERY_BACKEND = "cassandra"
+        $env:CASSANDRA_HOSTS = "127.0.0.1:9042"
+        $env:CASSANDRA_KEYSPACE = "siem"
+        $env:QUERY_RUNNER_DURATION_SEC = "$DurationSec"
+        $env:QUERY_RUNNER_INTERVAL_SEC = "$IntervalSec"
+        $env:QUERY_RUNNER_WARMUP_SEC = "$WarmupSec"
+        $env:QUERY_RUNNER_CONCURRENCY = "$Concurrency"
+        $env:QUERY_WORKLOAD_PATH = $WorkloadPath
+        $env:RUN_SCENARIO = $Scenario
+        $env:RUN_TAG = $RunTag
+
+        go run ./cmd/query-runner
+    }
+    finally {
+        Leave-RepoRoot
+    }
+}
+
 function Run-IngestPostgres {
     param(
         [int]$EPS,
@@ -335,10 +439,7 @@ function Run-IngestPostgres {
 
     Enter-RepoRoot
     try {
-        Set-CommonEnv `
-            -RedisStream "events-postgres" `
-            -RedisGroup "workers-postgres"
-
+        Set-CommonEnv -RedisStream "events-postgres" -RedisGroup "workers-postgres"
         $env:COLLECTOR_URL = "http://localhost:8080/ingest"
         $env:INGEST_BACKEND = "postgres"
         $env:POSTGRES_DSN = "postgres://siem:siem@127.0.0.1:5432/siem?sslmode=disable"
@@ -370,10 +471,7 @@ function Run-IngestClickHouse {
 
     Enter-RepoRoot
     try {
-        Set-CommonEnv `
-            -RedisStream "events-clickhouse" `
-            -RedisGroup "workers-clickhouse"
-
+        Set-CommonEnv -RedisStream "events-clickhouse" -RedisGroup "workers-clickhouse"
         $env:COLLECTOR_URL = "http://localhost:8080/ingest"
         $env:INGEST_BACKEND = "clickhouse"
         $env:CLICKHOUSE_DSN = "clickhouse://siem:siem@127.0.0.1:9000/siem"
@@ -405,10 +503,7 @@ function Run-IngestElasticsearch {
 
     Enter-RepoRoot
     try {
-        Set-CommonEnv `
-            -RedisStream "events-elasticsearch" `
-            -RedisGroup "workers-elasticsearch"
-
+        Set-CommonEnv -RedisStream "events-elasticsearch" -RedisGroup "workers-elasticsearch"
         $env:COLLECTOR_URL = "http://localhost:8080/ingest"
         $env:INGEST_BACKEND = "elasticsearch"
         $env:ELASTICSEARCH_URL = "http://127.0.0.1:9200"
@@ -429,27 +524,80 @@ function Run-IngestElasticsearch {
     }
 }
 
+function Run-IngestCassandra {
+    param(
+        [int]$EPS,
+        [int]$Batch,
+        [int]$DurationSec = 10,
+        [string]$RunTag = "",
+        [string]$Scenario = "ingest-only"
+    )
+
+    Enter-RepoRoot
+    try {
+        Set-CommonEnv -RedisStream "events-cassandra" -RedisGroup "workers-cassandra"
+        $env:COLLECTOR_URL = "http://localhost:8080/ingest"
+        $env:INGEST_BACKEND = "cassandra"
+        $env:CASSANDRA_HOSTS = "127.0.0.1:9042"
+        $env:CASSANDRA_KEYSPACE = "siem"
+        $env:GENERATOR_EPS = "$EPS"
+        $env:GENERATOR_BATCH = "$Batch"
+        $env:GENERATOR_SEC = "$DurationSec"
+        $env:DRAIN_TIMEOUT_SEC = "30"
+        $env:DRAIN_POLL_MS = "500"
+        $env:DRAIN_STABLE_CHECKS = "3"
+        $env:RUN_SCENARIO = $Scenario
+        $env:WORKER_WRITE_MODE = "batch"
+        $env:RUN_TAG = $RunTag
+
+        go run ./cmd/generator
+    }
+    finally {
+        Leave-RepoRoot
+    }
+}
+
 function Start-PostgresStack {
     param(
-        [string]$WriteMode = "batch"
+        [string]$WriteMode = "batch",
+        [int]$ReadCount = 100,
+        [string]$Scenario = "ingest-only"
     )
 
     $commonPath = Join-Path $Script:RepoRoot "scripts\common.ps1"
-
     Open-NewPowerShell ". '$commonPath'; Start-Collector -RedisStream 'events-postgres'" | Out-Null
-    Open-NewPowerShell ". '$commonPath'; Start-WorkerPostgres -WriteMode '$WriteMode'" | Out-Null
+    Open-NewPowerShell ". '$commonPath'; Start-WorkerPostgres -WriteMode '$WriteMode' -ReadCount $ReadCount -Scenario '$Scenario'" | Out-Null
 }
 
 function Start-ClickHouseStack {
-    $commonPath = Join-Path $Script:RepoRoot "scripts\common.ps1"
+    param(
+        [int]$ReadCount = 100,
+        [string]$Scenario = "ingest-only"
+    )
 
+    $commonPath = Join-Path $Script:RepoRoot "scripts\common.ps1"
     Open-NewPowerShell ". '$commonPath'; Start-Collector -RedisStream 'events-clickhouse'" | Out-Null
-    Open-NewPowerShell ". '$commonPath'; Start-WorkerClickHouse" | Out-Null
+    Open-NewPowerShell ". '$commonPath'; Start-WorkerClickHouse -ReadCount $ReadCount -Scenario '$Scenario'" | Out-Null
 }
 
 function Start-ElasticsearchStack {
-    $commonPath = Join-Path $Script:RepoRoot "scripts\common.ps1"
+    param(
+        [int]$ReadCount = 100,
+        [string]$Scenario = "ingest-only"
+    )
 
+    $commonPath = Join-Path $Script:RepoRoot "scripts\common.ps1"
     Open-NewPowerShell ". '$commonPath'; Start-Collector -RedisStream 'events-elasticsearch'" | Out-Null
-    Open-NewPowerShell ". '$commonPath'; Start-WorkerElasticsearch" | Out-Null
+    Open-NewPowerShell ". '$commonPath'; Start-WorkerElasticsearch -ReadCount $ReadCount -Scenario '$Scenario'" | Out-Null
+}
+
+function Start-CassandraStack {
+    param(
+        [int]$ReadCount = 100,
+        [string]$Scenario = "ingest-only"
+    )
+
+    $commonPath = Join-Path $Script:RepoRoot "scripts\common.ps1"
+    Open-NewPowerShell ". '$commonPath'; Start-Collector -RedisStream 'events-cassandra'" | Out-Null
+    Open-NewPowerShell ". '$commonPath'; Start-WorkerCassandra -ReadCount $ReadCount -Scenario '$Scenario'" | Out-Null
 }
