@@ -16,6 +16,7 @@ import (
 	"siem-bench/internal/metrics"
 	"siem-bench/internal/model"
 	"siem-bench/internal/reporting"
+	castorage "siem-bench/internal/storage/cassandra"
 	chstorage "siem-bench/internal/storage/clickhouse"
 	esstorage "siem-bench/internal/storage/elasticsearch"
 	pgstorage "siem-bench/internal/storage/postgres"
@@ -75,33 +76,25 @@ func runWorkloadPostgres(workload model.QueryWorkload, backend string, stats map
 
 			switch q.Type {
 			case "search_by_host":
-				acc := stats[q.Name]
-				execQuery(acc, backend, q.Name, func() error {
+				execQuery(stats[q.Name], backend, q.Name, func() error {
 					_, err := storage.SearchByHost(context.Background(), q.Value, q.Limit)
 					return err
 				}, collectStats)
-
 			case "search_by_user":
-				acc := stats[q.Name]
-				execQuery(acc, backend, q.Name, func() error {
+				execQuery(stats[q.Name], backend, q.Name, func() error {
 					_, err := storage.SearchByUser(context.Background(), q.Value, q.Limit)
 					return err
 				}, collectStats)
-
 			case "count_by_severity":
-				acc := stats[q.Name]
-				execQuery(acc, backend, q.Name, func() error {
+				execQuery(stats[q.Name], backend, q.Name, func() error {
 					_, err := storage.CountBySeverity(context.Background())
 					return err
 				}, collectStats)
-
 			case "top_hosts":
-				acc := stats[q.Name]
-				execQuery(acc, backend, q.Name, func() error {
+				execQuery(stats[q.Name], backend, q.Name, func() error {
 					_, err := storage.TopHosts(context.Background(), q.Limit)
 					return err
 				}, collectStats)
-
 			default:
 				log.Printf("unknown workload query type: %s", q.Type)
 			}
@@ -132,33 +125,25 @@ func runWorkloadClickHouse(workload model.QueryWorkload, backend string, stats m
 
 			switch q.Type {
 			case "search_by_host":
-				acc := stats[q.Name]
-				execQuery(acc, backend, q.Name, func() error {
+				execQuery(stats[q.Name], backend, q.Name, func() error {
 					_, err := storage.SearchByHost(context.Background(), q.Value, q.Limit)
 					return err
 				}, collectStats)
-
 			case "search_by_user":
-				acc := stats[q.Name]
-				execQuery(acc, backend, q.Name, func() error {
+				execQuery(stats[q.Name], backend, q.Name, func() error {
 					_, err := storage.SearchByUser(context.Background(), q.Value, q.Limit)
 					return err
 				}, collectStats)
-
 			case "count_by_severity":
-				acc := stats[q.Name]
-				execQuery(acc, backend, q.Name, func() error {
+				execQuery(stats[q.Name], backend, q.Name, func() error {
 					_, err := storage.CountBySeverity(context.Background())
 					return err
 				}, collectStats)
-
 			case "top_hosts":
-				acc := stats[q.Name]
-				execQuery(acc, backend, q.Name, func() error {
+				execQuery(stats[q.Name], backend, q.Name, func() error {
 					_, err := storage.TopHosts(context.Background(), q.Limit)
 					return err
 				}, collectStats)
-
 			default:
 				log.Printf("unknown workload query type: %s", q.Type)
 			}
@@ -187,33 +172,74 @@ func runWorkloadElasticsearch(workload model.QueryWorkload, backend string, stat
 
 			switch q.Type {
 			case "search_by_host":
-				acc := stats[q.Name]
-				execQuery(acc, backend, q.Name, func() error {
+				execQuery(stats[q.Name], backend, q.Name, func() error {
 					_, err := storage.SearchByHost(context.Background(), q.Value, q.Limit)
 					return err
 				}, collectStats)
-
 			case "search_by_user":
-				acc := stats[q.Name]
-				execQuery(acc, backend, q.Name, func() error {
+				execQuery(stats[q.Name], backend, q.Name, func() error {
 					_, err := storage.SearchByUser(context.Background(), q.Value, q.Limit)
 					return err
 				}, collectStats)
-
 			case "count_by_severity":
-				acc := stats[q.Name]
-				execQuery(acc, backend, q.Name, func() error {
+				execQuery(stats[q.Name], backend, q.Name, func() error {
 					_, err := storage.CountBySeverity(context.Background())
 					return err
 				}, collectStats)
-
 			case "top_hosts":
-				acc := stats[q.Name]
-				execQuery(acc, backend, q.Name, func() error {
+				execQuery(stats[q.Name], backend, q.Name, func() error {
 					_, err := storage.TopHosts(context.Background(), q.Limit)
 					return err
 				}, collectStats)
+			default:
+				log.Printf("unknown workload query type: %s", q.Type)
+			}
+		}
 
+		time.Sleep(time.Duration(intervalSec) * time.Second)
+	}
+}
+
+func runWorkloadCassandra(workload model.QueryWorkload, backend string, stats map[string]*model.QueryAccumulator, hostsCSV string, keyspace string, intervalSec int, deadline time.Time, collectStats bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	storage, err := castorage.New(ctx, hostsCSV, keyspace)
+	cancel()
+	if err != nil {
+		log.Fatalf("cassandra connect failed: %v", err)
+	}
+	defer func() {
+		if err := storage.Close(); err != nil {
+			log.Printf("cassandra close error: %v", err)
+		}
+	}()
+
+	for time.Now().Before(deadline) {
+		for _, q := range workload.Queries {
+			if !q.Enabled {
+				continue
+			}
+
+			switch q.Type {
+			case "search_by_host":
+				execQuery(stats[q.Name], backend, q.Name, func() error {
+					_, err := storage.SearchByHost(context.Background(), q.Value, q.Limit)
+					return err
+				}, collectStats)
+			case "search_by_user":
+				execQuery(stats[q.Name], backend, q.Name, func() error {
+					_, err := storage.SearchByUser(context.Background(), q.Value, q.Limit)
+					return err
+				}, collectStats)
+			case "count_by_severity":
+				execQuery(stats[q.Name], backend, q.Name, func() error {
+					_, err := storage.CountBySeverity(context.Background())
+					return err
+				}, collectStats)
+			case "top_hosts":
+				execQuery(stats[q.Name], backend, q.Name, func() error {
+					_, err := storage.TopHosts(context.Background(), q.Limit)
+					return err
+				}, collectStats)
 			default:
 				log.Printf("unknown workload query type: %s", q.Type)
 			}
@@ -239,6 +265,8 @@ func runConcurrent(workload model.QueryWorkload, backend string, stats map[strin
 				runWorkloadClickHouse(workload, backend, stats, cfg.ClickHouseDSN, intervalSec, deadline, collectStats)
 			case "elasticsearch":
 				runWorkloadElasticsearch(workload, backend, stats, cfg.ElasticsearchURL, intervalSec, deadline, collectStats)
+			case "cassandra":
+				runWorkloadCassandra(workload, backend, stats, cfg.CassandraHosts, cfg.CassandraKeyspace, intervalSec, deadline, collectStats)
 			default:
 				log.Printf("unsupported QUERY_BACKEND in worker %d: %s", workerNum, backend)
 			}
@@ -246,6 +274,17 @@ func runConcurrent(workload model.QueryWorkload, backend string, stats map[strin
 	}
 
 	wg.Wait()
+}
+
+func resultPathForScenario(runScenario, backend, runID string) string {
+	switch runScenario {
+	case "mixed":
+		return fmt.Sprintf("results/mixed/%s/query-%s-%s.json", backend, backend, runID)
+	case "longrun":
+		return fmt.Sprintf("results/longrun/%s/query-%s-%s.json", backend, backend, runID)
+	default:
+		return fmt.Sprintf("results/query/%s/query-%s-%s.json", backend, backend, runID)
+	}
 }
 
 func main() {
@@ -310,9 +349,7 @@ func main() {
 	if warmupSec > 0 {
 		warmupDeadline := time.Now().Add(time.Duration(warmupSec) * time.Second)
 		log.Printf("starting warm-up phase for %ds", warmupSec)
-
 		runConcurrent(workload, backend, stats, cfg, intervalSec, warmupDeadline, false, concurrency)
-
 		log.Printf("warm-up phase finished")
 	}
 
@@ -367,13 +404,7 @@ func main() {
 		Queries:    queryStats,
 	}
 
-	resultPath := ""
-	switch runScenario {
-	case "mixed":
-		resultPath = fmt.Sprintf("results/mixed/query-%s-%s.json", backend, runID)
-	default:
-		resultPath = fmt.Sprintf("results/query/query-%s-%s.json", backend, runID)
-	}
+	resultPath := resultPathForScenario(runScenario, backend, runID)
 
 	if err := model.SaveQueryRunResult(resultPath, result); err != nil {
 		log.Fatalf("failed to save query result file: %v", err)
