@@ -17,6 +17,7 @@ import (
 	"siem-bench/internal/model"
 	"siem-bench/internal/reporting"
 
+	castorage "siem-bench/internal/storage/cassandra"
 	chstorage "siem-bench/internal/storage/clickhouse"
 	esstorage "siem-bench/internal/storage/elasticsearch"
 	pgstorage "siem-bench/internal/storage/postgres"
@@ -109,6 +110,19 @@ func waitForDrain(cfg config.Config, db counter, buf *buffer.RedisBuffer) (int64
 	}
 }
 
+func resultPathForScenario(runScenario, backend, runID string) string {
+	switch runScenario {
+	case "tuning":
+		return fmt.Sprintf("results/tuning/%s/run-%s-%s.json", backend, backend, runID)
+	case "mixed":
+		return fmt.Sprintf("results/mixed/%s/ingest-%s-%s.json", backend, backend, runID)
+	case "longrun":
+		return fmt.Sprintf("results/longrun/%s/ingest-%s-%s.json", backend, backend, runID)
+	default:
+		return fmt.Sprintf("results/ingest/%s/run-%s-%s.json", backend, backend, runID)
+	}
+}
+
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
@@ -158,6 +172,18 @@ func main() {
 		defer func() {
 			if err := storage.Close(); err != nil {
 				log.Printf("elasticsearch close error: %v", err)
+			}
+		}()
+		db = storage
+
+	case "cassandra":
+		storage, err := castorage.New(ctx, cfg.CassandraHosts, cfg.CassandraKeyspace)
+		if err != nil {
+			log.Fatalf("cassandra connect failed: %v", err)
+		}
+		defer func() {
+			if err := storage.Close(); err != nil {
+				log.Printf("cassandra close error: %v", err)
 			}
 		}()
 		db = storage
@@ -368,13 +394,7 @@ func main() {
 		FinishedAt: finishedAt,
 	}
 
-	resultPath := ""
-	switch runScenario {
-	case "mixed":
-		resultPath = fmt.Sprintf("results/mixed/ingest-%s-%s.json", backend, runID)
-	default:
-		resultPath = fmt.Sprintf("results/ingest/run-%s-%s.json", backend, runID)
-	}
+	resultPath := resultPathForScenario(runScenario, backend, runID)
 
 	if err := model.SaveRunResult(resultPath, result); err != nil {
 		log.Printf("failed to save run result: %v", err)
