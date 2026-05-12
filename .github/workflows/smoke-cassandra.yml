@@ -1,0 +1,165 @@
+name: Cassandra smoke benchmark
+
+on:
+  push:
+    branches:
+      - benchmark-scenarios-cassandra
+  workflow_dispatch:
+
+jobs:
+  smoke-cassandra:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download Go modules
+        run: go mod download
+
+      - name: Start Redis and Cassandra
+        run: docker compose -f deploy/docker-compose.yml up -d redis cassandra
+
+      - name: Wait for Redis
+        run: |
+          for i in {1..30}; do
+            if docker exec siem-redis redis-cli ping | grep -q PONG; then
+              echo "Redis is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Redis did not become ready"
+          docker logs siem-redis || true
+          exit 1
+
+      - name: Wait for Cassandra
+        run: |
+          for i in {1..60}; do
+            if docker exec siem-cassandra cqlsh -e 'DESCRIBE KEYSPACES' >/tmp/cassandra-ready.log 2>&1; then
+              echo "Cassandra is ready"
+              exit 0
+            fi
+            echo "Waiting for Cassandra... attempt $i"
+            cat /tmp/cassandra-ready.log || true
+            sleep 5
+          done
+          echo "Cassandra did not become ready"
+          docker logs siem-cassandra || true
+          exit 1
+
+      - name: Apply Cassandra schema
+        run: docker exec -i siem-cassandra cqlsh < migrations/cassandra/001_init.cql
+
+      - name: Build commands
+        run: |
+          go build ./cmd/collector
+          go build ./cmd/worker-cassandra
+          go build ./cmd/generator
+          go build ./cmd/query-runner
+
+      - name: Start collector
+        run: |
+          REDIS_ADDR=127.0.0.1:6379 \
+          REDIS_STREAM=events-cassandra \
+          HTTP_ADDR=:8080 \
+          go run ./cmd/collector > collector.log 2>&1 &
+          echo $! > collector.pid
+          sleep 5
+          curl -fsS http://127.0.0.1:8080/health
+
+      - name: Start Cassandra worker
+        run: |
+          REDIS_ADDR=127.0.0.1:6379 \
+          REDIS_STREAM=events-cassandra \
+          REDIS_GROUP=workers-cassandra \
+          REDIS_CONSUMER=worker-cassandra-1 \
+          CASSANDRA_HOSTS=127.0.0.1:9042 \
+          CASSANDRA_KEYSPACE=siem \
+          WORKER_READ_COUNT=100 \
+          WORKER_WRITE_MODE=batch \
+          RUN_SCENARIO=ingest-only \
+          go run ./cmd/worker-cassandra > worker-cassandra.log 2>&1 &
+          echo $! > worker-cassandra.pid
+          sleep 8
+          curl -fsS http://127.0.0.1:2116/metrics >/tmp/worker-cassandra.metrics
+
+      - name: Run ingest smoke scenario
+        run: |
+          REDIS_ADDR=127.0.0.1:6379 \
+          REDIS_STREAM=events-cassandra \
+          REDIS_GROUP=workers-cassandra \
+          COLLECTOR_URL=http://127.0.0.1:8080/ingest \
+          INGEST_BACKEND=cassandra \
+          CASSANDRA_HOSTS=127.0.0.1:9042 \
+          CASSANDRA_KEYSPACE=siem \
+          GENERATOR_EPS=100 \
+          GENERATOR_BATCH=50 \
+          GENERATOR_SEC=20 \
+          DRAIN_TIMEOUT_SEC=60 \
+          DRAIN_POLL_MS=500 \
+          DRAIN_STABLE_CHECKS=3 \
+          RUN_SCENARIO=ingest-only \
+          WORKER_WRITE_MODE=batch \
+          RUN_TAG=github-actions-smoke-cassandra-100eps \
+          go run ./cmd/generator
+
+      - name: Inspect smoke result
+        run: |
+          echo "Generated result files:"
+          find results -type f -maxdepth 4 -print || true
+          result_file=$(find results/ingest/cassandra -type f -name '*.json' | head -n 1)
+          if [ -z "$result_file" ]; then
+            echo "No Cassandra ingest result file found"
+            exit 1
+          fi
+          echo "Result file: $result_file"
+          cat "$result_file"
+          python3 - <<'PY'
+          import json, pathlib, sys
+          files = list(pathlib.Path('results/ingest/cassandra').glob('*.json'))
+          if not files:
+              print('No result files found')
+              sys.exit(1)
+          data = json.loads(files[0].read_text())
+          sent = data.get('sent_events', 0)
+          inserted = data.get('db_inserted', 0)
+          failed = data.get('failed_requests', 0)
+          loss = data.get('loss_percent', 100)
+          pending = data.get('pending_at_finish', -1)
+          print(f'sent={sent} inserted={inserted} failed={failed} loss={loss} pending={pending}')
+          assert sent == 2000, f'expected 2000 sent events, got {sent}'
+          assert inserted == 2000, f'expected 2000 inserted events, got {inserted}'
+          assert failed == 0, f'expected 0 failed requests, got {failed}'
+          assert loss == 0, f'expected 0 loss percent, got {loss}'
+          assert pending == 0, f'expected 0 pending messages, got {pending}'
+          PY
+
+      - name: Print service logs on failure
+        if: failure()
+        run: |
+          echo "--- collector.log ---"
+          cat collector.log || true
+          echo "--- worker-cassandra.log ---"
+          cat worker-cassandra.log || true
+          echo "--- cassandra docker logs ---"
+          docker logs siem-cassandra || true
+          echo "--- redis docker logs ---"
+          docker logs siem-redis || true
+
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cassandra-smoke-artifacts
+          path: |
+            collector.log
+            worker-cassandra.log
+            results/**
