@@ -52,3 +52,8 @@ scrape_configs:
     static_configs:
       - targets:
           - 'host.docker.internal:2115'
+
+  - job_name: 'worker-cassandra'
+    static_configs:
+      - targets:
+          - 'host.docker.internal:2116'
