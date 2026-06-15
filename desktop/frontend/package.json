@@ -1,0 +1,19 @@
+{
+  "name": "siem-bench-control-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "latest",
+    "typescript": "latest",
+    "vite": "latest",
+    "vue": "latest",
+    "vue-tsc": "latest"
+  },
+  "devDependencies": {}
+}
