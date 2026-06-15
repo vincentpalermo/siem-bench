@@ -98,6 +98,14 @@ function Reset-RedisForBackend {
 }
 
 function Reset-PostgresTable {
+    $ddlPath = Join-Path $Script:RepoRoot "migrations\001_init.sql"
+
+    if (-not (Test-Path $ddlPath)) {
+        throw "PostgreSQL DDL file not found: $ddlPath"
+    }
+
+    Get-Content $ddlPath -Raw | docker exec -i siem-postgres psql -U siem -d siem | Out-Null
+
     docker exec -i siem-postgres psql -U siem -d siem -c "
         TRUNCATE TABLE events RESTART IDENTITY;
     " | Out-Null

@@ -20,6 +20,7 @@ import (
 	chstorage "siem-bench/internal/storage/clickhouse"
 	esstorage "siem-bench/internal/storage/elasticsearch"
 	pgstorage "siem-bench/internal/storage/postgres"
+	cassandrastorage "siem-bench/internal/storage/cassandra"
 )
 
 type counter interface {
@@ -160,6 +161,14 @@ func main() {
 				log.Printf("elasticsearch close error: %v", err)
 			}
 		}()
+		db = storage
+	
+	case "cassandra":
+		storage, err := cassandrastorage.New("localhost")
+		if err != nil {
+			log.Fatalf("cassandra connect failed: %v", err)
+		}
+		defer storage.Close()
 		db = storage
 
 	default:

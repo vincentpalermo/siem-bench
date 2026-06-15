@@ -1,0 +1,91 @@
+{
+  "run_id": "20260423-084121",
+  "backend": "postgres",
+  "total_queries": 80,
+  "failed_queries": 80,
+  "config_snapshot": {
+    "backend": "postgres",
+    "duration_sec": 20,
+    "interval_sec": 1,
+    "warmup_sec": 3,
+    "concurrency": 1,
+    "run_scenario": "query-only",
+    "workload_name": "default-query-workload",
+    "workload_path": "scenarios/query-default.json"
+  },
+  "workload": [
+    {
+      "name": "search_by_host",
+      "type": "search_by_host",
+      "value": "host-1",
+      "limit": 100,
+      "enabled": true
+    },
+    {
+      "name": "search_by_user",
+      "type": "search_by_user",
+      "value": "admin",
+      "limit": 100,
+      "enabled": true
+    },
+    {
+      "name": "count_by_severity",
+      "type": "count_by_severity",
+      "enabled": true
+    },
+    {
+      "name": "top_hosts",
+      "type": "top_hosts",
+      "limit": 10,
+      "enabled": true
+    }
+  ],
+  "started_at": "2026-04-23T08:41:21.2670468Z",
+  "finished_at": "2026-04-23T08:41:44.6024175Z",
+  "queries": [
+    {
+      "name": "top_hosts",
+      "count": 20,
+      "failed": 20,
+      "avg_duration_ms": 2.63145,
+      "max_duration_ms": 3.502,
+      "min_duration_ms": 1.12,
+      "last_duration_ms": 3.502
+    },
+    {
+      "name": "search_by_host",
+      "count": 20,
+      "failed": 20,
+      "avg_duration_ms": 3.839999999999999,
+      "max_duration_ms": 5.503,
+      "min_duration_ms": 1.638,
+      "last_duration_ms": 4.749
+    },
+    {
+      "name": "search_by_user",
+      "count": 20,
+      "failed": 20,
+      "avg_duration_ms": 2.4345000000000003,
+      "max_duration_ms": 3.485,
+      "min_duration_ms": 1.639,
+      "last_duration_ms": 3.037
+    },
+    {
+      "name": "count_by_severity",
+      "count": 20,
+      "failed": 20,
+      "avg_duration_ms": 2.5062500000000005,
+      "max_duration_ms": 3.789,
+      "min_duration_ms": 1.61,
+      "last_duration_ms": 3.789
+    }
+  ],
+  "system_cpu_avg_percent": 0.6145823078591598,
+  "system_cpu_max_percent": 0.6905841854814165,
+  "system_memory_avg_mb": 63.72109375,
+  "system_memory_max_mb": 64.1484375,
+  "system_disk_read_mb": 0,
+  "system_disk_write_mb": 0,
+  "system_net_rx_mb": 0,
+  "system_net_tx_mb": 0
+}
