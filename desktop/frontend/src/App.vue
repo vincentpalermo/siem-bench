@@ -8,7 +8,7 @@ type LogLine = { stream: string; line: string; at: string }
 const status = ref<any>({ repoRoot: 'detecting...', platform: '', scriptsReady: false, isRunning: false, resultsSummary: '' })
 const logs = ref<LogLine[]>([])
 const busy = ref(false)
-const lastResult = ref('Ready')
+const lastResult = ref('Готово')
 
 const form = reactive({
   backend: 'postgres',
@@ -44,23 +44,23 @@ async function refreshStatus() {
 async function runAction(label: string, action: () => Promise<any>) {
   try {
     busy.value = true
-    lastResult.value = `${label} running...`
+    lastResult.value = `${label}: выполняется...`
     pushLog('system', `▶ ${label}`)
     const result = await action()
-    lastResult.value = `${label} finished: exit ${result?.exitCode ?? 0}`
+    lastResult.value = `${label}: завершено, код ${result?.exitCode ?? 0}`
     await refreshStatus()
   } catch (error: any) {
-    lastResult.value = `${label} failed`
+    lastResult.value = `${label}: ошибка`
     pushLog('stderr', error?.message ?? String(error))
   } finally {
     busy.value = false
   }
 }
 
-function startInfra() { return runAction('Start infrastructure', StartInfrastructure) }
-function stopServices() { return runAction('Stop Go services', StopGoServices) }
-function preflight() { return runAction('Preflight', RunPreflight) }
-function runBenchmark() { return runAction(`Benchmark ${form.backend}/${form.mode}`, () => RunBenchmark({ ...form })) }
+function startInfra() { return runAction('Запуск инфраструктуры', StartInfrastructure) }
+function stopServices() { return runAction('Остановить сервисы', StopGoServices) }
+function preflight() { return runAction('Тест системы', RunPreflight) }
+function runBenchmark() { return runAction(`Запуск ${form.backend}/${form.mode}`, () => RunBenchmark({ ...form })) }
 function clearLogs() { logs.value = [] }
 
 onMounted(async () => {
@@ -74,9 +74,8 @@ onMounted(async () => {
   <main class="shell">
     <section class="hero glass">
       <div>
-        <p class="eyebrow">SIEM-like benchmark stand</p>
+        <p class="eyebrow">SIEM benchmark stand</p>
         <h1>Control Center</h1>
-        <p class="subtitle">Премиальная панель управления инфраструктурой, прогонами и результатами PostgreSQL · ClickHouse · Elasticsearch · Cassandra.</p>
       </div>
       <div class="status-pill" :class="busy ? 'busy' : 'ready'">
         <span></span>{{ busy ? 'RUNNING' : 'READY' }}
@@ -92,19 +91,19 @@ onMounted(async () => {
 
     <section class="layout">
       <aside class="panel glass">
-        <h2>Quick actions</h2>
-        <button class="premium" :disabled="busy" @click="startInfra">Start infrastructure</button>
-        <button :disabled="busy" @click="stopServices">Stop Go services</button>
-        <button :disabled="busy" @click="preflight">Run preflight</button>
-        <button :disabled="busy" @click="OpenResultsFolder">Open results</button>
-        <button class="ghost" @click="clearLogs">Clear logs</button>
+        <h2>Быстрые действия</h2>
+        <button class="premium" :disabled="busy" @click="startInfra">Запуск инфраструктуры</button>
+        <button :disabled="busy" @click="stopServices">Остановить сервисы</button>
+        <button :disabled="busy" @click="preflight">Тест системы</button>
+        <button :disabled="busy" @click="OpenResultsFolder">Открыть результаты</button>
+        <button class="ghost" @click="clearLogs">Очистить логи</button>
         <div class="hint">{{ lastResult }}</div>
       </aside>
 
       <section class="panel glass form-panel">
         <div class="section-head">
           <div><p class="eyebrow">Benchmark launcher</p><h2>Новый прогон</h2></div>
-          <button class="premium run" :disabled="busy" @click="runBenchmark">Launch run</button>
+          <button class="premium run" :disabled="busy" @click="runBenchmark">Запуск</button>
         </div>
 
         <div class="form-grid">
@@ -129,7 +128,7 @@ onMounted(async () => {
     </section>
 
     <section class="console glass">
-      <div class="section-head"><h2>Live logs</h2><button class="ghost" @click="refreshStatus">Refresh status</button></div>
+      <div class="section-head"><h2>Live logs</h2><button class="ghost" @click="refreshStatus">Обновить статус</button></div>
       <div class="terminal">
         <div v-for="(log, index) in logs" :key="index" :class="['log', log.stream]">
           <span>{{ log.at }}</span><b>{{ log.stream }}</b><code>{{ log.line }}</code>
