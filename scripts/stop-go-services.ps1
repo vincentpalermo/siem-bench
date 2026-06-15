@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Continue"
 
-$ports = @(8080, 2112, 2113, 2114, 2115)
+$ports = @(8080, 2112, 2113, 2114, 2115, 2116)
 
 function Get-PidsByPort {
     param(
