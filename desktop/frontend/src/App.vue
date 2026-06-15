@@ -118,7 +118,7 @@ onMounted(async () => {
 
       <section class="panel glass form-panel">
         <div class="section-head">
-          <div><p class="eyebrow">Benchmark launcher</p><h2>Новый прогон</h2></div>
+          <div><p class="eyebrow">Benchmark launcher</p></div>
           <button class="premium run" :disabled="busy" @click="runBenchmark">Запуск</button>
         </div>
 
