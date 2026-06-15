@@ -44,6 +44,8 @@ func backendContainerName(backend string) (string, error) {
 		return "siem-clickhouse", nil
 	case "elasticsearch":
 		return "siem-elasticsearch", nil
+	case "cassandra":
+		return "siem-cassandra", nil
 	default:
 		return "", fmt.Errorf("unsupported backend: %s", backend)
 	}
