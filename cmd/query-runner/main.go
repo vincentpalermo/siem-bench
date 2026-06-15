@@ -16,6 +16,7 @@ import (
 	"siem-bench/internal/metrics"
 	"siem-bench/internal/model"
 	"siem-bench/internal/reporting"
+	cassandrastorage "siem-bench/internal/storage/cassandra"
 	chstorage "siem-bench/internal/storage/clickhouse"
 	esstorage "siem-bench/internal/storage/elasticsearch"
 	pgstorage "siem-bench/internal/storage/postgres"
@@ -74,6 +75,9 @@ func openStorage(ctx context.Context, cfg config.Config, backend string) (queryS
 	case "elasticsearch":
 		s, err := esstorage.New(cfg.ElasticsearchURL); if err != nil { log.Fatalf("elasticsearch connect failed: %v", err) }
 		return s, func(){ if err := s.Close(); err != nil { log.Printf("elasticsearch close error: %v", err) } }
+	case "cassandra":
+		s, err := cassandrastorage.New("localhost"); if err != nil { log.Fatalf("cassandra connect failed: %v", err) }
+		return s, s.Close
 	default:
 		log.Fatalf("unsupported QUERY_BACKEND: %s", backend)
 	}
