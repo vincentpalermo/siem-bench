@@ -48,6 +48,34 @@ $QueryModes = @("query-only", "mixed", "longrun-mixed")
 $IsIngestMode = $IngestModes -contains $Scenario
 $IsQueryMode = $QueryModes -contains $Scenario
 
+$EffectiveStartCollector = [bool]$StartCollector
+$EffectiveStartWorker = [bool]$StartWorker
+$EffectiveStartQueryRunner = [bool]$StartQueryRunner
+
+if (-not $PSBoundParameters.ContainsKey("StartCollector")) {
+    $EffectiveStartCollector = $IsIngestMode
+}
+if (-not $PSBoundParameters.ContainsKey("StartWorker")) {
+    $EffectiveStartWorker = $IsIngestMode
+}
+if (-not $PSBoundParameters.ContainsKey("StartQueryRunner")) {
+    # query-only runs inline in the current window; mixed needs a second window.
+    $EffectiveStartQueryRunner = ($IsQueryMode -and $IsIngestMode)
+}
+
+$QueryRunnerExecution = "none"
+if ($IsQueryMode) {
+    if ($EffectiveStartQueryRunner) {
+        $QueryRunnerExecution = "new-window"
+    }
+    elseif (-not $IsIngestMode) {
+        $QueryRunnerExecution = "inline"
+    }
+    else {
+        $QueryRunnerExecution = "disabled"
+    }
+}
+
 if (($Scenario -eq "longrun-ingest" -or $Scenario -eq "longrun-mixed") -and $DurationSec -eq 10) {
     $DurationSec = 1800
 }
@@ -190,44 +218,45 @@ function Build-QuerySummaryForScenario {
 
 Write-Host ""
 Write-Host "Launch configuration:" -ForegroundColor Cyan
-Write-Host "  Backend:           $Backend"
-Write-Host "  Mode:              $Mode"
-Write-Host "  Scenario:          $Scenario"
+Write-Host "  Backend:                 $Backend"
+Write-Host "  Mode:                    $Mode"
+Write-Host "  Scenario:                $Scenario"
 if ($IsIngestMode) {
-    Write-Host "  EPS:               $EPS"
-    Write-Host "  Batch:             $Batch"
+    Write-Host "  EPS:                     $EPS"
+    Write-Host "  Batch:                   $Batch"
 }
-Write-Host "  DurationSec:       $DurationSec"
+Write-Host "  DurationSec:             $DurationSec"
 if ($IsQueryMode) {
-    Write-Host "  QueryIntervalSec:  $QueryIntervalSec"
-    Write-Host "  QueryWarmupSec:    $QueryWarmupSec"
-    Write-Host "  QueryConcurrency:  $QueryConcurrency"
-    Write-Host "  WorkloadPath:      $WorkloadPath"
+    Write-Host "  QueryIntervalSec:        $QueryIntervalSec"
+    Write-Host "  QueryWarmupSec:          $QueryWarmupSec"
+    Write-Host "  QueryConcurrency:        $QueryConcurrency"
+    Write-Host "  WorkloadPath:            $WorkloadPath"
+    Write-Host "  QueryRunnerExecution:    $QueryRunnerExecution"
 }
-Write-Host "  WorkerReadCount:   $WorkerReadCount"
-Write-Host "  WriteMode:         $WriteMode"
-Write-Host "  RunTag:            $RunTag"
-Write-Host "  ResetStorage:      $ResetStorage"
-Write-Host "  StartCollector:    $StartCollector"
-Write-Host "  StartWorker:       $StartWorker"
-Write-Host "  StartQueryRunner:  $StartQueryRunner"
-Write-Host "  BuildSummary:      $BuildSummary"
+Write-Host "  WorkerReadCount:         $WorkerReadCount"
+Write-Host "  WriteMode:               $WriteMode"
+Write-Host "  RunTag:                  $RunTag"
+Write-Host "  ResetStorage:            $ResetStorage"
+Write-Host "  StartCollector:          $EffectiveStartCollector"
+Write-Host "  StartWorker:             $EffectiveStartWorker"
+Write-Host "  StartQueryRunnerWindow:  $EffectiveStartQueryRunner"
+Write-Host "  BuildSummary:            $BuildSummary"
 Write-Host ""
 
 if ($ResetStorage) { Reset-SelectedStorage }
 
-if ($StartCollector) {
+if ($EffectiveStartCollector) {
     Start-SelectedCollector
     Start-Sleep -Seconds 2
 }
 
-if ($StartWorker -and $IsIngestMode) {
+if ($EffectiveStartWorker -and $IsIngestMode) {
     Start-SelectedWorker
     Start-Sleep -Seconds 3
 }
 
 if ($IsQueryMode) {
-    if ($StartQueryRunner) {
+    if ($EffectiveStartQueryRunner) {
         Start-SelectedQueryRunner
         Start-Sleep -Seconds 2
     }
@@ -238,7 +267,7 @@ if ($IsQueryMode) {
 
 if ($IsIngestMode) { Run-SelectedIngest }
 
-if ($IsQueryMode -and $StartQueryRunner -and ($Scenario -eq "mixed" -or $Scenario -eq "longrun-mixed")) {
+if ($IsQueryMode -and $EffectiveStartQueryRunner -and ($Scenario -eq "mixed" -or $Scenario -eq "longrun-mixed")) {
     Start-Sleep -Seconds ($QueryWarmupSec + $DurationSec + 2)
 }
 
