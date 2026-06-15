@@ -1,20 +1,23 @@
 param(
-    [ValidateSet("postgres", "clickhouse", "elasticsearch")]
-    [string]$Backend,
+    [ValidateSet("postgres", "clickhouse", "elasticsearch", "cassandra")]
+    [string]$Backend = "postgres",
 
-    [ValidateSet("ingest", "query", "mixed")]
-    [string]$Mode,
+    [ValidateSet("ingest", "query", "ingest-only", "query-only", "mixed", "longrun-ingest", "longrun-mixed")]
+    [string]$Mode = "ingest-only",
 
-    [int]$EPS,
-    [int]$Batch,
-    [int]$DurationSec,
-    [int]$QueryIntervalSec,
-    [int]$WorkerReadCount,
+    [int]$EPS = 500,
+    [int]$Batch = 10,
+    [int]$DurationSec = 10,
+    [int]$QueryIntervalSec = 1,
+    [int]$QueryWarmupSec = 3,
+    [int]$QueryConcurrency = 1,
+    [string]$WorkloadPath = "scenarios/query-default.json",
+    [int]$WorkerReadCount = 100,
 
     [ValidateSet("row", "batch")]
-    [string]$WriteMode,
+    [string]$WriteMode = "batch",
 
-    [string]$RunTag,
+    [string]$RunTag = "",
 
     [switch]$ResetStorage,
     [switch]$StartCollector,
@@ -27,371 +30,179 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $commonPath = Join-Path $scriptDir "common.ps1"
-
-if (-not (Test-Path $commonPath)) {
-    throw "common.ps1 not found: $commonPath"
-}
-
+if (-not (Test-Path $commonPath)) { throw "common.ps1 not found: $commonPath" }
 . $commonPath
 
-function Read-MenuChoice {
-    param(
-        [string]$Prompt,
-        [string[]]$Options,
-        [int]$DefaultIndex = 1
-    )
-
-    if ($Options.Count -eq 0) {
-        throw "Read-MenuChoice: options list is empty"
-    }
-
-    if ($DefaultIndex -lt 1 -or $DefaultIndex -gt $Options.Count) {
-        $DefaultIndex = 1
-    }
-
-    while ($true) {
-        Write-Host ""
-        Write-Host $Prompt -ForegroundColor Cyan
-
-        for ($i = 0; $i -lt $Options.Count; $i++) {
-            $num = $i + 1
-            $marker = if ($num -eq $DefaultIndex) { "*" } else { " " }
-            Write-Host (" {0} [{1}] {2}" -f $marker, $num, $Options[$i])
-        }
-
-        $raw = Read-Host ("Enter number [default: {0}]" -f $DefaultIndex)
-
-        if ([string]::IsNullOrWhiteSpace($raw)) {
-            return $Options[$DefaultIndex - 1]
-        }
-
-        $selected = 0
-        if ([int]::TryParse($raw, [ref]$selected) -and $selected -ge 1 -and $selected -le $Options.Count) {
-            return $Options[$selected - 1]
-        }
-
-        Write-Host "Please enter a valid number from the list." -ForegroundColor Yellow
+function Normalize-Mode {
+    param([string]$Value)
+    switch ($Value) {
+        "ingest" { return "ingest-only" }
+        "query" { return "query-only" }
+        default { return $Value }
     }
 }
 
-function Read-IntValue {
-    param(
-        [string]$Prompt,
-        [int]$Default,
-        [int]$Min = 1
-    )
+$Scenario = Normalize-Mode $Mode
+$IngestModes = @("ingest-only", "mixed", "longrun-ingest", "longrun-mixed")
+$QueryModes = @("query-only", "mixed", "longrun-mixed")
+$IsIngestMode = $IngestModes -contains $Scenario
+$IsQueryMode = $QueryModes -contains $Scenario
 
-    while ($true) {
-        $value = Read-Host ("{0} [{1}]" -f $Prompt, $Default)
-
-        if ([string]::IsNullOrWhiteSpace($value)) {
-            return $Default
-        }
-
-        $parsed = 0
-        if ([int]::TryParse($value, [ref]$parsed) -and $parsed -ge $Min) {
-            return $parsed
-        }
-
-        Write-Host ("Enter an integer >= {0}" -f $Min) -ForegroundColor Yellow
-    }
+if (($Scenario -eq "longrun-ingest" -or $Scenario -eq "longrun-mixed") -and $DurationSec -eq 10) {
+    $DurationSec = 1800
 }
 
-function Read-BoolValue {
-    param(
-        [string]$Prompt,
-        [bool]$Default = $false
-    )
-
-    $defaultText = if ($Default) { "Y" } else { "N" }
-
-    while ($true) {
-        $value = Read-Host ("{0} [Y/N, default: {1}]" -f $Prompt, $defaultText)
-
-        if ([string]::IsNullOrWhiteSpace($value)) {
-            return $Default
-        }
-
-        switch ($value.ToLower()) {
-            "y"   { return $true }
-            "yes" { return $true }
-            "n"   { return $false }
-            "no"  { return $false }
-            default {
-                Write-Host "Enter Y or N" -ForegroundColor Yellow
-            }
-        }
-    }
+if ($Backend -ne "postgres") { $WriteMode = "batch" }
+if ([string]::IsNullOrWhiteSpace($RunTag)) {
+    $RunTag = "$Backend-$Scenario-$WriteMode"
+    if ($IsIngestMode) { $RunTag = "$RunTag-${EPS}eps" }
 }
 
-function Launch-CommandInNewWindow {
-    param(
-        [string]$CommandText
-    )
-
-    Start-Process powershell -ArgumentList @(
-        "-NoExit",
-        "-ExecutionPolicy", "Bypass",
-        "-Command", $CommandText
-    ) | Out-Null
-}
-
-function Ensure-Defaults {
-    if (-not $script:Backend) { $script:Backend = "postgres" }
-    if (-not $script:Mode) { $script:Mode = "ingest" }
-    if (-not $script:EPS -or $script:EPS -le 0) { $script:EPS = 500 }
-    if (-not $script:Batch -or $script:Batch -le 0) { $script:Batch = 10 }
-    if (-not $script:DurationSec -or $script:DurationSec -le 0) { $script:DurationSec = 10 }
-    if (-not $script:QueryIntervalSec -or $script:QueryIntervalSec -le 0) { $script:QueryIntervalSec = 1 }
-    if (-not $script:WorkerReadCount -or $script:WorkerReadCount -le 0) { $script:WorkerReadCount = 100 }
-    if (-not $script:WriteMode) { $script:WriteMode = "batch" }
-    if (-not $script:RunTag) { $script:RunTag = "" }
-}
-
-function Prompt-MissingValues {
-    if (-not $PSBoundParameters.ContainsKey("Backend")) {
-        $backendOptions = @("postgres", "clickhouse", "elasticsearch")
-        $defaultBackendIndex = [Math]::Max(1, ($backendOptions.IndexOf($script:Backend) + 1))
-        $script:Backend = Read-MenuChoice -Prompt "Select backend" -Options $backendOptions -DefaultIndex $defaultBackendIndex
-    }
-
-    if (-not $PSBoundParameters.ContainsKey("Mode")) {
-        $modeOptions = @("ingest", "query", "mixed")
-        $defaultModeIndex = [Math]::Max(1, ($modeOptions.IndexOf($script:Mode) + 1))
-        $script:Mode = Read-MenuChoice -Prompt "Select benchmark mode" -Options $modeOptions -DefaultIndex $defaultModeIndex
-    }
-
-    if ($script:Mode -eq "ingest" -or $script:Mode -eq "mixed") {
-        if (-not $PSBoundParameters.ContainsKey("EPS")) {
-            $script:EPS = Read-IntValue -Prompt "Enter EPS" -Default $script:EPS -Min 1
-        }
-
-        if (-not $PSBoundParameters.ContainsKey("Batch")) {
-            $defaultBatch = if ($script:EPS -ge 2000) { 50 } elseif ($script:EPS -ge 1000) { 20 } else { 10 }
-            $script:Batch = Read-IntValue -Prompt "Enter batch size" -Default $defaultBatch -Min 1
-        }
-    }
-
-    if (-not $PSBoundParameters.ContainsKey("DurationSec")) {
-        $script:DurationSec = Read-IntValue -Prompt "Enter the run duration, sec" -Default $script:DurationSec -Min 1
-    }
-
-    if (-not $PSBoundParameters.ContainsKey("WorkerReadCount")) {
-        $script:WorkerReadCount = Read-IntValue -Prompt "Enter WORKER_READ_COUNT" -Default $script:WorkerReadCount -Min 1
-    }
-
-    if ($script:Backend -eq "postgres") {
-        if (-not $PSBoundParameters.ContainsKey("WriteMode")) {
-            $writeModeOptions = @("row", "batch")
-            $defaultWriteModeIndex = [Math]::Max(1, ($writeModeOptions.IndexOf($script:WriteMode) + 1))
-            $script:WriteMode = Read-MenuChoice -Prompt "Select PostgreSQL worker write mode" -Options $writeModeOptions -DefaultIndex $defaultWriteModeIndex
-        }
-    }
-    else {
-        $script:WriteMode = "batch"
-    }
-
-    if ($script:Mode -eq "query" -or $script:Mode -eq "mixed") {
-        if (-not $PSBoundParameters.ContainsKey("QueryIntervalSec")) {
-            $script:QueryIntervalSec = Read-IntValue -Prompt "Enter QUERY_RUNNER_INTERVAL_SEC" -Default $script:QueryIntervalSec -Min 1
-        }
-    }
-
-    if (-not $PSBoundParameters.ContainsKey("RunTag")) {
-        $defaultTag = "$($script:Backend)-$($script:Mode)-$($script:WriteMode)"
-        if ($script:Mode -eq "ingest" -or $script:Mode -eq "mixed") {
-            $defaultTag = "$defaultTag-$($script:EPS)eps"
-        }
-
-        $value = Read-Host "Enter RUN_TAG [$defaultTag]"
-        if ([string]::IsNullOrWhiteSpace($value)) {
-            $script:RunTag = $defaultTag
-        }
-        else {
-            $script:RunTag = $value
-        }
-    }
-
-    if (-not $PSBoundParameters.ContainsKey("ResetStorage")) {
-        $script:ResetStorage = Read-BoolValue -Prompt "Reset storage data before run?" -Default $false
-    }
-
-    if (-not $PSBoundParameters.ContainsKey("StartCollector")) {
-        $script:StartCollector = Read-BoolValue -Prompt "Launch collector in a new window?" -Default $true
-    }
-
-    if (-not $PSBoundParameters.ContainsKey("StartWorker")) {
-        $defaultStartWorker = ($script:Mode -eq "ingest" -or $script:Mode -eq "mixed")
-        $script:StartWorker = Read-BoolValue -Prompt "Launch worker in a new window?" -Default $defaultStartWorker
-    }
-
-    if (-not $PSBoundParameters.ContainsKey("StartQueryRunner")) {
-        $defaultStartQuery = ($script:Mode -eq "query" -or $script:Mode -eq "mixed")
-        $script:StartQueryRunner = Read-BoolValue -Prompt "Run query-runner in a new window?" -Default $defaultStartQuery
-    }
-
-    if (-not $PSBoundParameters.ContainsKey("BuildSummary")) {
-        $defaultBuildSummary = ($script:Mode -eq "ingest" -or $script:Mode -eq "mixed")
-        $script:BuildSummary = Read-BoolValue -Prompt "Collect ingest summary.csv after the run?" -Default $defaultBuildSummary
+function Get-RedisStreamForBackend {
+    param([string]$Name)
+    switch ($Name) {
+        "postgres" { return "events-postgres" }
+        "clickhouse" { return "events-clickhouse" }
+        "elasticsearch" { return "events-elasticsearch" }
+        "cassandra" { return "events-cassandra" }
+        default { throw "Unsupported backend: $Name" }
     }
 }
 
 function Reset-SelectedStorage {
-    switch ($script:Backend) {
-        "postgres"      { Reset-PostgresTable }
-        "clickhouse"    { Reset-ClickHouseTable }
+    switch ($Backend) {
+        "postgres" { Reset-PostgresTable }
+        "clickhouse" { Reset-ClickHouseTable }
         "elasticsearch" { Reset-ElasticsearchIndex }
+        "cassandra" { Reset-CassandraTable }
+        default { throw "Unsupported backend for reset: $Backend" }
     }
+    Reset-RedisForBackend -Backend $Backend
 }
 
 function Start-SelectedCollector {
-    $cmd = ""
-
-    switch ($script:Backend) {
-        "postgres" {
-            $cmd = @"
-. "$commonPath"
-Start-Collector -RedisStream "events-postgres"
-"@
-        }
-        "clickhouse" {
-            $cmd = @"
-. "$commonPath"
-Start-Collector -RedisStream "events-clickhouse"
-"@
-        }
-        "elasticsearch" {
-            $cmd = @"
-. "$commonPath"
-Start-Collector -RedisStream "events-elasticsearch"
-"@
-        }
-    }
-
-    Launch-CommandInNewWindow -CommandText $cmd
+    $stream = Get-RedisStreamForBackend $Backend
+    Open-NewPowerShell ". '$commonPath'; Start-Collector -RedisStream '$stream'" | Out-Null
 }
 
 function Start-SelectedWorker {
-    $cmd = ""
-
-    switch ($script:Backend) {
+    switch ($Backend) {
         "postgres" {
-            $cmd = @"
-. "$commonPath"
-Start-WorkerPostgres -WriteMode "$($script:WriteMode)" -ReadCount $($script:WorkerReadCount)
-"@
+            Open-NewPowerShell ". '$commonPath'; Start-WorkerPostgres -WriteMode '$WriteMode' -ReadCount $WorkerReadCount -Scenario '$Scenario'" | Out-Null
         }
         "clickhouse" {
-            $cmd = @"
-. "$commonPath"
-Start-WorkerClickHouse -ReadCount $($script:WorkerReadCount)
-"@
+            Open-NewPowerShell ". '$commonPath'; Start-WorkerClickHouse -ReadCount $WorkerReadCount -Scenario '$Scenario'" | Out-Null
         }
         "elasticsearch" {
-            $cmd = @"
-. "$commonPath"
-Start-WorkerElasticsearch -ReadCount $($script:WorkerReadCount)
-"@
+            Open-NewPowerShell ". '$commonPath'; Start-WorkerElasticsearch -ReadCount $WorkerReadCount -Scenario '$Scenario'" | Out-Null
         }
+        "cassandra" {
+            Open-NewPowerShell ". '$commonPath'; Start-WorkerCassandra -ReadCount $WorkerReadCount -Scenario '$Scenario'" | Out-Null
+        }
+        default { throw "Unsupported backend for worker: $Backend" }
     }
-
-    Open-NewPowerShell $cmd
 }
 
 function Start-SelectedQueryRunner {
-    $cmd = ""
-
-    switch ($script:Backend) {
+    switch ($Backend) {
         "postgres" {
-            $cmd = @"
-. "$commonPath"
-Start-QueryRunnerPostgres -DurationSec $($script:DurationSec) -IntervalSec $($script:QueryIntervalSec)
-"@
+            Open-NewPowerShell ". '$commonPath'; Start-QueryRunnerPostgres -DurationSec $DurationSec -IntervalSec $QueryIntervalSec -WarmupSec $QueryWarmupSec -Concurrency $QueryConcurrency -WorkloadPath '$WorkloadPath' -Scenario '$Scenario' -RunTag '$RunTag'" | Out-Null
         }
         "clickhouse" {
-            $cmd = @"
-. "$commonPath"
-Start-QueryRunnerClickHouse -DurationSec $($script:DurationSec) -IntervalSec $($script:QueryIntervalSec)
-"@
+            Open-NewPowerShell ". '$commonPath'; Start-QueryRunnerClickHouse -DurationSec $DurationSec -IntervalSec $QueryIntervalSec -WarmupSec $QueryWarmupSec -Concurrency $QueryConcurrency -WorkloadPath '$WorkloadPath' -Scenario '$Scenario' -RunTag '$RunTag'" | Out-Null
         }
         "elasticsearch" {
-            $cmd = @"
-. "$commonPath"
-Start-QueryRunnerElasticsearch -DurationSec $($script:DurationSec) -IntervalSec $($script:QueryIntervalSec)
-"@
+            Open-NewPowerShell ". '$commonPath'; Start-QueryRunnerElasticsearch -DurationSec $DurationSec -IntervalSec $QueryIntervalSec -WarmupSec $QueryWarmupSec -Concurrency $QueryConcurrency -WorkloadPath '$WorkloadPath' -Scenario '$Scenario' -RunTag '$RunTag'" | Out-Null
         }
-    }
-
-    Launch-CommandInNewWindow -CommandText $cmd
-}
-function Run-SelectedIngest {
-    switch ($script:Backend) {
-        "postgres" {
-            Run-IngestPostgres -EPS $script:EPS -Batch $script:Batch -DurationSec $script:DurationSec -WriteMode $script:WriteMode -RunTag $script:RunTag
+        "cassandra" {
+            Open-NewPowerShell ". '$commonPath'; Start-QueryRunnerCassandra -DurationSec $DurationSec -IntervalSec $QueryIntervalSec -WarmupSec $QueryWarmupSec -Concurrency $QueryConcurrency -WorkloadPath '$WorkloadPath' -Scenario '$Scenario' -RunTag '$RunTag'" | Out-Null
         }
-        "clickhouse" {
-            Run-IngestClickHouse -EPS $script:EPS -Batch $script:Batch -DurationSec $script:DurationSec -RunTag $script:RunTag
-        }
-        "elasticsearch" {
-            Run-IngestElasticsearch -EPS $script:EPS -Batch $script:Batch -DurationSec $script:DurationSec -RunTag $script:RunTag
-        }
+        default { throw "Unsupported backend for query-runner: $Backend" }
     }
 }
 
 function Run-SelectedQuery {
-    Enter-RepoRoot
-    try {
-        switch ($script:Backend) {
-            "postgres" {
-                $env:QUERY_BACKEND = "postgres"
-                $env:POSTGRES_DSN = "postgres://siem:siem@127.0.0.1:5432/siem?sslmode=disable"
-            }
-            "clickhouse" {
-                $env:QUERY_BACKEND = "clickhouse"
-                $env:CLICKHOUSE_DSN = "clickhouse://siem:siem@127.0.0.1:9000/siem"
-            }
-            "elasticsearch" {
-                $env:QUERY_BACKEND = "elasticsearch"
-                $env:ELASTICSEARCH_URL = "http://127.0.0.1:9200"
-            }
-        }
-
-        $env:QUERY_RUNNER_DURATION_SEC = "$($script:DurationSec)"
-        $env:QUERY_RUNNER_INTERVAL_SEC = "$($script:QueryIntervalSec)"
-        $env:RUN_SCENARIO = "query-only"
-        $env:RUN_TAG = $script:RunTag
-
-        go run ./cmd/query-runner
-    }
-    finally {
-        Leave-RepoRoot
+    switch ($Backend) {
+        "postgres" { Start-QueryRunnerPostgres -DurationSec $DurationSec -IntervalSec $QueryIntervalSec -WarmupSec $QueryWarmupSec -Concurrency $QueryConcurrency -WorkloadPath $WorkloadPath -Scenario $Scenario -RunTag $RunTag }
+        "clickhouse" { Start-QueryRunnerClickHouse -DurationSec $DurationSec -IntervalSec $QueryIntervalSec -WarmupSec $QueryWarmupSec -Concurrency $QueryConcurrency -WorkloadPath $WorkloadPath -Scenario $Scenario -RunTag $RunTag }
+        "elasticsearch" { Start-QueryRunnerElasticsearch -DurationSec $DurationSec -IntervalSec $QueryIntervalSec -WarmupSec $QueryWarmupSec -Concurrency $QueryConcurrency -WorkloadPath $WorkloadPath -Scenario $Scenario -RunTag $RunTag }
+        "cassandra" { Start-QueryRunnerCassandra -DurationSec $DurationSec -IntervalSec $QueryIntervalSec -WarmupSec $QueryWarmupSec -Concurrency $QueryConcurrency -WorkloadPath $WorkloadPath -Scenario $Scenario -RunTag $RunTag }
+        default { throw "Unsupported backend for query run: $Backend" }
     }
 }
 
-function Build-IngestSummary {
+function Run-SelectedIngest {
+    switch ($Backend) {
+        "postgres" { Run-IngestPostgres -EPS $EPS -Batch $Batch -DurationSec $DurationSec -WriteMode $WriteMode -RunTag $RunTag -Scenario $Scenario }
+        "clickhouse" { Run-IngestClickHouse -EPS $EPS -Batch $Batch -DurationSec $DurationSec -RunTag $RunTag -Scenario $Scenario }
+        "elasticsearch" { Run-IngestElasticsearch -EPS $EPS -Batch $Batch -DurationSec $DurationSec -RunTag $RunTag -Scenario $Scenario }
+        "cassandra" { Run-IngestCassandra -EPS $EPS -Batch $Batch -DurationSec $DurationSec -RunTag $RunTag -Scenario $Scenario }
+        default { throw "Unsupported backend for ingest: $Backend" }
+    }
+}
+
+function Get-IngestSummaryPaths {
+    switch ($Scenario) {
+        "mixed" { return @{ Glob = "results/mixed/ingest-*.json"; Output = "results/mixed/summary-ingest.csv" } }
+        "longrun-ingest" { return @{ Glob = "results/longrun-ingest/ingest-*.json"; Output = "results/longrun-ingest/summary.csv" } }
+        "longrun-mixed" { return @{ Glob = "results/longrun-mixed/ingest-*.json"; Output = "results/longrun-mixed/summary-ingest.csv" } }
+        default { return @{ Glob = "results/ingest/*.json"; Output = "results/ingest/summary.csv" } }
+    }
+}
+
+function Get-QuerySummaryPaths {
+    switch ($Scenario) {
+        "mixed" { return @{ Glob = "results/mixed/query-*.json"; Output = "results/mixed/summary-query.csv" } }
+        "longrun-mixed" { return @{ Glob = "results/longrun-mixed/query-*.json"; Output = "results/longrun-mixed/summary-query.csv" } }
+        default { return @{ Glob = "results/query/query-*.json"; Output = "results/query/summary.csv" } }
+    }
+}
+
+function Build-IngestSummaryForScenario {
+    $paths = Get-IngestSummaryPaths
     Enter-RepoRoot
     try {
+        $env:RESULTS_GLOB = $paths.Glob
+        $env:RESULTS_OUTPUT = $paths.Output
         go run ./cmd/results-aggregator
     }
     finally {
+        Remove-Item Env:RESULTS_GLOB -ErrorAction SilentlyContinue
+        Remove-Item Env:RESULTS_OUTPUT -ErrorAction SilentlyContinue
         Leave-RepoRoot
     }
 }
 
-Ensure-Defaults
-Prompt-MissingValues
+function Build-QuerySummaryForScenario {
+    $paths = Get-QuerySummaryPaths
+    Enter-RepoRoot
+    try {
+        $env:RESULTS_GLOB = $paths.Glob
+        $env:RESULTS_OUTPUT = $paths.Output
+        go run ./cmd/query-results-aggregator
+    }
+    finally {
+        Remove-Item Env:RESULTS_GLOB -ErrorAction SilentlyContinue
+        Remove-Item Env:RESULTS_OUTPUT -ErrorAction SilentlyContinue
+        Leave-RepoRoot
+    }
+}
 
 Write-Host ""
 Write-Host "Launch configuration:" -ForegroundColor Cyan
 Write-Host "  Backend:           $Backend"
 Write-Host "  Mode:              $Mode"
-if ($Mode -eq "ingest" -or $Mode -eq "mixed") {
+Write-Host "  Scenario:          $Scenario"
+if ($IsIngestMode) {
     Write-Host "  EPS:               $EPS"
     Write-Host "  Batch:             $Batch"
 }
 Write-Host "  DurationSec:       $DurationSec"
-if ($Mode -eq "query" -or $Mode -eq "mixed") {
+if ($IsQueryMode) {
     Write-Host "  QueryIntervalSec:  $QueryIntervalSec"
+    Write-Host "  QueryWarmupSec:    $QueryWarmupSec"
+    Write-Host "  QueryConcurrency:  $QueryConcurrency"
+    Write-Host "  WorkloadPath:      $WorkloadPath"
 }
 Write-Host "  WorkerReadCount:   $WorkerReadCount"
 Write-Host "  WriteMode:         $WriteMode"
@@ -403,45 +214,37 @@ Write-Host "  StartQueryRunner:  $StartQueryRunner"
 Write-Host "  BuildSummary:      $BuildSummary"
 Write-Host ""
 
-if ($ResetStorage) {
-    Reset-SelectedStorage
-}
+if ($ResetStorage) { Reset-SelectedStorage }
 
 if ($StartCollector) {
     Start-SelectedCollector
     Start-Sleep -Seconds 2
 }
 
-if ($StartWorker -and ($Mode -eq "ingest" -or $Mode -eq "mixed")) {
+if ($StartWorker -and $IsIngestMode) {
     Start-SelectedWorker
     Start-Sleep -Seconds 3
 }
 
-switch ($Mode) {
-    "ingest" {
-        Run-SelectedIngest
+if ($IsQueryMode) {
+    if ($StartQueryRunner) {
+        Start-SelectedQueryRunner
+        Start-Sleep -Seconds 2
     }
-    "query" {
-        if ($StartQueryRunner) {
-            Start-SelectedQueryRunner
-            Write-Host "Query-runner launched in a new window." -ForegroundColor Green
-        }
-        else {
-            Run-SelectedQuery
-        }
-    }
-    "mixed" {
-        if ($StartQueryRunner) {
-            Start-SelectedQueryRunner
-            Start-Sleep -Seconds 2
-        }
-        Run-SelectedIngest
+    elseif (-not $IsIngestMode) {
+        Run-SelectedQuery
     }
 }
 
-if ($BuildSummary -and ($Mode -eq "ingest" -or $Mode -eq "mixed")) {
-    Write-Host "I'm collecting ingest summary..." -ForegroundColor Cyan
-    Build-IngestSummary
+if ($IsIngestMode) { Run-SelectedIngest }
+
+if ($IsQueryMode -and $StartQueryRunner -and ($Scenario -eq "mixed" -or $Scenario -eq "longrun-mixed")) {
+    Start-Sleep -Seconds ($QueryWarmupSec + $DurationSec + 2)
+}
+
+if ($BuildSummary) {
+    if ($IsIngestMode) { Build-IngestSummaryForScenario }
+    if ($IsQueryMode) { Build-QuerySummaryForScenario }
 }
 
 Write-Host "The scenario is complete." -ForegroundColor Green
