@@ -1,3 +1,5 @@
+DROP KEYSPACE IF EXISTS siem;
+
 CREATE KEYSPACE IF NOT EXISTS siem
 WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
 
