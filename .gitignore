@@ -9,6 +9,13 @@ bin/
 *.test
 coverage.out
 
+# Frontend / Wails
+node_modules/
+desktop/frontend/node_modules/
+desktop/build/bin/
+desktop/frontend/dist/*
+!desktop/frontend/dist/.gitkeep
+
 # Logs
 *.log
 
