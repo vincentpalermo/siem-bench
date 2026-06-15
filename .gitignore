@@ -1,38 +1,35 @@
-# binaries
-bin/
-dist/
-
-# build artifacts
+# Binaries
 *.exe
-*.exe~
 *.dll
 *.so
 *.dylib
-*.out
-*.test
 
-# Go coverage
-*.coverprofile
+# Go
+bin/
+*.test
 coverage.out
 
-# dependencies/workspaces
-vendor/
+# Logs
+*.log
+
+# Env
+.env
+.env.*
 
 # IDE
 .idea/
 .vscode/
 
-# env
-.env
-.env.*
-
-# logs
-*.log
-
-# results
-results/*.json
-results/*.csv
-
 # OS files
 .DS_Store
 Thumbs.db
+
+# Docker volumes / local data
+postgres_data/
+clickhouse_data/
+elasticsearch_data/
+cassandra_data/
+
+# Benchmark results
+results/**/*.json
+results/**/*.csv
