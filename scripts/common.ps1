@@ -107,8 +107,7 @@ function Reset-CassandraTable {
     $ddlPath = Join-Path $Script:RepoRoot "deploy\cassandra\init.cql"
     if (-not (Test-Path $ddlPath)) { throw "Cassandra CQL file not found: $ddlPath" }
     Get-Content $ddlPath -Raw | docker exec -i siem-cassandra cqlsh | Out-Null
-    try { docker exec -i siem-cassandra cqlsh -e "TRUNCATE siem.events;" | Out-Null } catch { Write-Host "Cassandra truncate skipped or failed; continuing..." -ForegroundColor Yellow }
-    Write-Host "Cassandra table reset: siem.events" -ForegroundColor Cyan
+    Write-Host "Cassandra keyspace reset: siem" -ForegroundColor Cyan
 }
 
 function Start-Collector {
