@@ -12,118 +12,37 @@ import (
 	"siem-bench/internal/model"
 )
 
-func getEnv(key, fallback string) string {
-	val := os.Getenv(key)
-	if val == "" {
-		return fallback
-	}
-	return val
-}
+func env(k, d string) string { if v := os.Getenv(k); v != "" { return v }; return d }
+func f64(v float64) string { return strconv.FormatFloat(v, 'f', 4, 64) }
 
 func main() {
-	resultsGlob := getEnv("RESULTS_GLOB", "results/query/query-*.json")
-	outputPath := getEnv("RESULTS_OUTPUT", "results/query/summary.csv")
+	glob := env("RESULTS_GLOB", "results/query/query-*.json")
+	out := env("RESULTS_OUTPUT", "results/query/summary.csv")
+	files, err := filepath.Glob(glob)
+	if err != nil { log.Fatalf("list query results: %v", err) }
+	if len(files) == 0 { log.Fatalf("no query result files found for glob: %s", glob) }
 
-	files, err := filepath.Glob(resultsGlob)
-	if err != nil {
-		log.Fatalf("failed to list query result files: %v", err)
+	runs := make([]model.QueryRunResult, 0, len(files))
+	for _, p := range files {
+		b, err := os.ReadFile(p); if err != nil { log.Printf("skip %s: %v", p, err); continue }
+		var r model.QueryRunResult
+		if err := json.Unmarshal(b, &r); err != nil { log.Printf("skip %s: %v", p, err); continue }
+		runs = append(runs, r)
 	}
-	if len(files) == 0 {
-		log.Fatalf("no query result files found for glob: %s", resultsGlob)
-	}
-
-	var runs []model.QueryRunResult
-
-	for _, f := range files {
-		data, err := os.ReadFile(f)
-		if err != nil {
-			log.Printf("skip %s: read error: %v", f, err)
-			continue
-		}
-
-		var run model.QueryRunResult
-		if err := json.Unmarshal(data, &run); err != nil {
-			log.Printf("skip %s: unmarshal error: %v", f, err)
-			continue
-		}
-
-		runs = append(runs, run)
-	}
-
 	sort.Slice(runs, func(i, j int) bool {
-		if runs[i].Backend != runs[j].Backend {
-			return runs[i].Backend < runs[j].Backend
-		}
-		if runs[i].ConfigSnapshot.Concurrency != runs[j].ConfigSnapshot.Concurrency {
-			return runs[i].ConfigSnapshot.Concurrency < runs[j].ConfigSnapshot.Concurrency
-		}
+		if runs[i].Backend != runs[j].Backend { return runs[i].Backend < runs[j].Backend }
+		if runs[i].ConfigSnapshot.RunScenario != runs[j].ConfigSnapshot.RunScenario { return runs[i].ConfigSnapshot.RunScenario < runs[j].ConfigSnapshot.RunScenario }
+		if runs[i].ConfigSnapshot.Concurrency != runs[j].ConfigSnapshot.Concurrency { return runs[i].ConfigSnapshot.Concurrency < runs[j].ConfigSnapshot.Concurrency }
 		return runs[i].StartedAt.Before(runs[j].StartedAt)
 	})
 
-	outFile, err := os.Create(outputPath)
-	if err != nil {
-		log.Fatalf("failed to create %s: %v", outputPath, err)
+	fp, err := os.Create(out); if err != nil { log.Fatalf("create %s: %v", out, err) }
+	defer fp.Close()
+	w := csv.NewWriter(fp); defer w.Flush()
+	w.Write([]string{"run_id","backend","run_scenario","duration_sec","interval_sec","warmup_sec","concurrency","workload_name","workload_path","total_queries","failed_queries","started_at","finished_at","cpu_avg_percent","cpu_max_percent","memory_avg_mb","memory_max_mb","disk_read_mb","disk_write_mb","net_rx_mb","net_tx_mb"})
+	for _, r := range runs {
+		c := r.ConfigSnapshot
+		w.Write([]string{r.RunID,r.Backend,c.RunScenario,strconv.Itoa(c.DurationSec),strconv.Itoa(c.IntervalSec),strconv.Itoa(c.WarmupSec),strconv.Itoa(c.Concurrency),c.WorkloadName,c.WorkloadPath,strconv.Itoa(r.TotalQueries),strconv.Itoa(r.FailedQueries),r.StartedAt.Format("2006-01-02T15:04:05Z07:00"),r.FinishedAt.Format("2006-01-02T15:04:05Z07:00"),f64(r.SystemCPUAvgPercent),f64(r.SystemCPUMaxPercent),f64(r.SystemMemoryAvgMB),f64(r.SystemMemoryMaxMB),f64(r.SystemDiskReadMB),f64(r.SystemDiskWriteMB),f64(r.SystemNetRxMB),f64(r.SystemNetTxMB)})
 	}
-	defer outFile.Close()
-
-	w := csv.NewWriter(outFile)
-	defer w.Flush()
-
-	header := []string{
-		"run_id",
-		"backend",
-		"duration_sec",
-		"interval_sec",
-		"warmup_sec",
-		"concurrency",
-		"run_scenario",
-		"workload_name",
-		"workload_path",
-		"total_queries",
-		"failed_queries",
-		"started_at",
-		"finished_at",
-		"system_cpu_avg_percent",
-		"system_cpu_max_percent",
-		"system_memory_avg_mb",
-		"system_memory_max_mb",
-		"system_disk_read_mb",
-		"system_disk_write_mb",
-		"system_net_rx_mb",
-		"system_net_tx_mb",
-	}
-	if err := w.Write(header); err != nil {
-		log.Fatalf("failed to write CSV header: %v", err)
-	}
-
-	for _, run := range runs {
-		row := []string{
-			run.RunID,
-			run.Backend,
-			strconv.Itoa(run.ConfigSnapshot.DurationSec),
-			strconv.Itoa(run.ConfigSnapshot.IntervalSec),
-			strconv.Itoa(run.ConfigSnapshot.WarmupSec),
-			strconv.Itoa(run.ConfigSnapshot.Concurrency),
-			run.ConfigSnapshot.RunScenario,
-			run.ConfigSnapshot.WorkloadName,
-			run.ConfigSnapshot.WorkloadPath,
-			strconv.Itoa(run.TotalQueries),
-			strconv.Itoa(run.FailedQueries),
-			strconv.FormatFloat(run.SystemCPUAvgPercent, 'f', 4, 64),
-			strconv.FormatFloat(run.SystemCPUMaxPercent, 'f', 4, 64),
-			strconv.FormatFloat(run.SystemMemoryAvgMB, 'f', 4, 64),
-			strconv.FormatFloat(run.SystemMemoryMaxMB, 'f', 4, 64),
-			strconv.FormatFloat(run.SystemDiskReadMB, 'f', 4, 64),
-			strconv.FormatFloat(run.SystemDiskWriteMB, 'f', 4, 64),
-			strconv.FormatFloat(run.SystemNetRxMB, 'f', 4, 64),
-			strconv.FormatFloat(run.SystemNetTxMB, 'f', 4, 64),
-			run.StartedAt.Format("2006-01-02T15:04:05Z07:00"),
-			run.FinishedAt.Format("2006-01-02T15:04:05Z07:00"),
-		}
-		if err := w.Write(row); err != nil {
-			log.Fatalf("failed to write CSV row: %v", err)
-		}
-	}
-
-	log.Printf("query summary written: %d runs -> %s", len(runs), outputPath)
+	log.Printf("query summary written: %d runs -> %s", len(runs), out)
 }
