@@ -26,6 +26,22 @@ const form = reactive({
   buildSummary: true
 })
 
+const paramHints = {
+  backend: 'Исследуемая СУБД. Возможные значения: PostgreSQL, ClickHouse, Elasticsearch, Cassandra. Определяет, какой worker, stream Redis и storage backend будут использоваться в прогоне.',
+  mode: 'Сценарий эксперимента. ingest-only — только запись, query-only — только запросы, mixed — запись и запросы одновременно, longrun-* — длительные варианты этих режимов.',
+  eps: 'Events per second — целевая скорость генерации событий. Принимает положительные целые значения. Чем выше EPS, тем сильнее нагрузка на collector, Redis, worker и выбранную СУБД.',
+  batch: 'Размер пачки событий, отправляемой генератором в collector одним HTTP-запросом. Принимает положительные целые значения. Влияет на число HTTP-запросов и эффективность записи.',
+  durationSec: 'Длительность прогона в секундах. Принимает положительные целые значения. Влияет на общий объём событий: sent_events = EPS × DurationSec.',
+  workerReadCount: 'Сколько сообщений worker пытается читать из Redis Stream за один раз. Принимает положительные целые значения. Влияет на скорость выгрузки очереди и размер внутренних batch-операций.',
+  writeMode: 'Режим записи worker в СУБД. batch — пакетная запись, row — построчная запись. Для ClickHouse, Elasticsearch и Cassandra используется batch.',
+  queryIntervalSec: 'Интервал между итерациями query-runner в секундах. Принимает положительные целые значения. Чем меньше интервал, тем выше частота аналитических запросов.',
+  queryWarmupSec: 'Время прогрева query-runner перед фиксацией результатов. Принимает 0 или положительное число. Позволяет не учитывать стартовые задержки.',
+  queryConcurrency: 'Количество параллельных query-worker потоков. Принимает положительные целые значения. Чем выше значение, тем сильнее нагрузка аналитическими запросами.',
+  workloadPath: 'Путь к JSON-файлу workload-сценария. Например: scenarios/query-default.json или scenarios/query-heavy.json. Определяет набор запросов для query-only и mixed.',
+  resetStorage: 'Если включено, перед прогоном очищается выбранная СУБД и Redis Stream. Используется для чистого сравнения без влияния старых данных.',
+  buildSummary: 'Если включено, после прогона пересобирается CSV summary по результатам. Нужно для таблиц, графиков и дальнейшего анализа.'
+}
+
 const backends = ['postgres', 'clickhouse', 'elasticsearch', 'cassandra']
 const modes = ['ingest-only', 'query-only', 'mixed', 'longrun-ingest', 'longrun-mixed']
 const isQueryMode = computed(() => ['query-only', 'mixed', 'longrun-mixed'].includes(form.mode))
@@ -107,22 +123,22 @@ onMounted(async () => {
         </div>
 
         <div class="form-grid">
-          <label>СУБД<select v-model="form.backend"><option v-for="b in backends" :key="b" :value="b">{{ b }}</option></select></label>
-          <label>Режим<select v-model="form.mode"><option v-for="m in modes" :key="m" :value="m">{{ m }}</option></select></label>
-          <label v-if="isIngestMode">EPS<input v-model.number="form.eps" type="number" min="1" /></label>
-          <label v-if="isIngestMode">Batch<input v-model.number="form.batch" type="number" min="1" /></label>
-          <label>Duration, sec<input v-model.number="form.durationSec" type="number" min="1" /></label>
-          <label>Worker read count<input v-model.number="form.workerReadCount" type="number" min="1" /></label>
-          <label>Write mode<select v-model="form.writeMode"><option>batch</option><option>row</option></select></label>
-          <label v-if="isQueryMode">Query interval<input v-model.number="form.queryIntervalSec" type="number" min="1" /></label>
-          <label v-if="isQueryMode">Warmup<input v-model.number="form.queryWarmupSec" type="number" min="0" /></label>
-          <label v-if="isQueryMode">Concurrency<input v-model.number="form.queryConcurrency" type="number" min="1" /></label>
-          <label v-if="isQueryMode" class="wide">Workload<input v-model="form.workloadPath" /></label>
+          <label><span class="field-title">СУБД<span class="tooltip" :data-tooltip="paramHints.backend">?</span></span><select v-model="form.backend"><option v-for="b in backends" :key="b" :value="b">{{ b }}</option></select></label>
+          <label><span class="field-title">Режим<span class="tooltip" :data-tooltip="paramHints.mode">?</span></span><select v-model="form.mode"><option v-for="m in modes" :key="m" :value="m">{{ m }}</option></select></label>
+          <label v-if="isIngestMode"><span class="field-title">EPS<span class="tooltip" :data-tooltip="paramHints.eps">?</span></span><input v-model.number="form.eps" type="number" min="1" /></label>
+          <label v-if="isIngestMode"><span class="field-title">Batch<span class="tooltip" :data-tooltip="paramHints.batch">?</span></span><input v-model.number="form.batch" type="number" min="1" /></label>
+          <label><span class="field-title">Duration, sec<span class="tooltip" :data-tooltip="paramHints.durationSec">?</span></span><input v-model.number="form.durationSec" type="number" min="1" /></label>
+          <label><span class="field-title">Worker read count<span class="tooltip" :data-tooltip="paramHints.workerReadCount">?</span></span><input v-model.number="form.workerReadCount" type="number" min="1" /></label>
+          <label><span class="field-title">Write mode<span class="tooltip" :data-tooltip="paramHints.writeMode">?</span></span><select v-model="form.writeMode"><option>batch</option><option>row</option></select></label>
+          <label v-if="isQueryMode"><span class="field-title">Query interval<span class="tooltip" :data-tooltip="paramHints.queryIntervalSec">?</span></span><input v-model.number="form.queryIntervalSec" type="number" min="1" /></label>
+          <label v-if="isQueryMode"><span class="field-title">Warmup<span class="tooltip" :data-tooltip="paramHints.queryWarmupSec">?</span></span><input v-model.number="form.queryWarmupSec" type="number" min="0" /></label>
+          <label v-if="isQueryMode"><span class="field-title">Concurrency<span class="tooltip" :data-tooltip="paramHints.queryConcurrency">?</span></span><input v-model.number="form.queryConcurrency" type="number" min="1" /></label>
+          <label v-if="isQueryMode" class="wide"><span class="field-title">Workload<span class="tooltip" :data-tooltip="paramHints.workloadPath">?</span></span><input v-model="form.workloadPath" /></label>
         </div>
 
         <div class="switches">
-          <label><input v-model="form.resetStorage" type="checkbox" /> Reset storage</label>
-          <label><input v-model="form.buildSummary" type="checkbox" /> Build summary</label>
+          <label><input v-model="form.resetStorage" type="checkbox" /> Reset storage <span class="tooltip" :data-tooltip="paramHints.resetStorage">?</span></label>
+          <label><input v-model="form.buildSummary" type="checkbox" /> Build summary <span class="tooltip" :data-tooltip="paramHints.buildSummary">?</span></label>
         </div>
       </section>
     </section>
