@@ -32,6 +32,8 @@ func WorkerMetricsURL(backend string) string {
 		return "http://localhost:2113/metrics"
 	case "elasticsearch":
 		return "http://localhost:2115/metrics"
+	case "cassandra":
+		return "http://localhost:2116/metrics"
 	default:
 		return ""
 	}
