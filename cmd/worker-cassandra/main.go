@@ -15,6 +15,7 @@ import (
 	"siem-bench/internal/buffer"
 	"siem-bench/internal/config"
 	"siem-bench/internal/metrics"
+	"siem-bench/internal/model"
 	cassandrastorage "siem-bench/internal/storage/cassandra"
 )
 
